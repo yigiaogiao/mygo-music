@@ -1,0 +1,36 @@
+application:
+  subdomain: mygo-music
+  multi_instance: false
+  # The service is named "music"; the platform gives it a DNS name under the
+  # package. The gateway sends every path to the Go server.
+  routes:
+    - /=http://music.cloud.lazycat.app.mygomusic.lzcapp:8090
+
+services:
+  music:
+    # No image is built for this app: the system's default Alpine runtime
+    # runs the static server binary from content.tar, at /lzcapp/pkg/content.
+    entrypoint: /lzcapp/pkg/content/music-server
+    binds:
+      # /lzcapp/var survives restarts and upgrades; the server keeps the
+      # library, playlists and lyric cache there.
+      - /lzcapp/var/mygomusic:/data
+    environment:
+      - ADDR=:8090
+      - DATA_DIR=/data
+      - MUSIC_DIR=/lzcapp/media/RemoteFS
+      - WEB_DIR=/lzcapp/pkg/content/web
+      - ONLINE_LYRICS=true
+      # The default runtime may have no CA bundle of its own; one is packed
+      # beside the binary for LRCLib's HTTPS.
+      - SSL_CERT_FILE=/lzcapp/pkg/content/ca-certificates.crt
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8090/api/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+# Mounts the LazyCat netdisk under /lzcapp/media, with RemoteFS inside it.
+ext_config:
+  enable_media_access: true

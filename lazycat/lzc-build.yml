@@ -1,0 +1,6 @@
+# Builds the app without Docker: scripts/build-lpk.sh compiles the server
+# binary and the WebAssembly UI into ./content, which becomes content.tar.
+manifest: ./lzc-manifest.yml
+pkgout: ./dist
+icon: ./icon.png
+contentdir: ./content

@@ -9,7 +9,3 @@ locales:
   zh-CN:
     name: MyGo 音乐
     description: 播放懒猫网盘里的音乐，没有歌词的歌会自动到 LRCLib 寻找。
-permissions:
-  required:
-    - net.internet
-    - media.read
