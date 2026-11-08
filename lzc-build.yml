@@ -1,0 +1,7 @@
+manifest: ./lzc-manifest.yml
+pkgout: ./dist
+icon: ./resources/icon.png
+images:
+  mygo-music:
+    dockerfile: ./Dockerfile
+    context: ./

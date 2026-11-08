@@ -2,6 +2,8 @@
 // Silero's voice activity detection cuts the audio into what is said, and
 // Qwen3-ASR, through sherpa-onnx, writes each of those down, with
 // punctuation. Nothing leaves the device but the model's download.
+//go:build !js
+
 package speech
 
 import (

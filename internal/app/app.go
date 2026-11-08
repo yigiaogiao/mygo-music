@@ -82,6 +82,9 @@ type app struct {
 	history []route
 	forward []route // the pages gone back from, the last first to go to
 
+	// On a narrow window, the sidebar shows over the page as a drawer.
+	navOpen bool
+
 	accountOpen bool         // the dropdown of the account row shows
 	signIn      signInDialog // signing in to a source
 	// signInPages are the windows of plugins' sign-in pages showing, by
@@ -114,6 +117,11 @@ type app struct {
 	settingsQuery     string // what's searched for in the settings
 	settingsSearchBox ui.Handle
 	settingsUnderTop  bool // the settings' page has scrolled under its top edge
+	// In the browser there is no second window: the settings show over the
+	// page instead.
+	settingsOpen   bool
+	settingsScroll ui.ScrollState
+	settingsPick   ui.ScrollState
 
 	suggestions suggestState // what the search field's query may be after
 
@@ -227,8 +235,17 @@ func userDataDir(sub string) string {
 // none of them started yet, and makes active the one last used, if it's there.
 func (a *app) makeSources() {
 	a.local = local.New(userDataDir("local"))
-	builtIn := newLibrary(a.local)
-	a.allLibs = []*library{builtIn}
+	var builtIn *library
+	webSrc := platformSource()
+	if webSrc != nil {
+		// The browser's source is the server it came from, and the files
+		// there take the place of the built-in one.
+		a.allLibs = []*library{newLibrary(webSrc)}
+		a.settings.CacheMB = 0
+	} else {
+		builtIn = newLibrary(a.local)
+		a.allLibs = []*library{builtIn}
+	}
 	plugin.SetOpenURL(mygo.Shell.OpenExternal)
 	plugin.SetAppVersion(mygo.App.Version())
 	plugin.SetWebSignIn(a.webSignIn)
@@ -247,9 +264,16 @@ func (a *app) makeSources() {
 		a.library = lib
 	}
 	a.route = route{page: pageHome, src: a.library.id}
-	a.local.OnChange(func() {
-		a.post(func() { a.libraryChanged(builtIn) })
-	})
+	if builtIn != nil {
+		a.local.OnChange(func() {
+			a.post(func() { a.libraryChanged(builtIn) })
+		})
+	}
+	if w, ok := webSrc.(interface{ OnChange(func()) }); ok {
+		w.OnChange(func() {
+			a.post(func() { a.libraryChanged(a.libs[0]) })
+		})
+	}
 }
 
 // enabledChanged lists the plugins that are on. There's always one: with all of

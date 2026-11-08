@@ -342,9 +342,17 @@ func (a *app) transport(c *ui.Context, color, dim, on ui.Color, size float32) {
 	})
 }
 
+// mobilePlayerBarHeight is the height of the player bar in a narrow window,
+// showing what plays and the controls that matter on a phone.
+const mobilePlayerBarHeight = 64
+
 // playerBar runs along the foot of the content: what plays, its controls
 // and its progress, and the volume.
 func (a *app) playerBar(c *ui.Context) {
+	if a.mobile(c) {
+		a.compactPlayerBar(c)
+		return
+	}
 	p := a.pal
 	pl := a.pl
 	tr := pl.Current()
@@ -444,4 +452,70 @@ func (a *app) playerBar(c *ui.Context) {
 			a.volumeButton(c, p.text.Alpha(0.75))
 		})
 	})
+}
+
+// compactPlayerBar is the player bar of a narrow window: the cover and what
+// plays, which opens Now Playing, and the controls a phone needs, with the
+// progress along the top and no volume, which the phone's buttons keep.
+func (a *app) compactPlayerBar(c *ui.Context) {
+	p := a.pal
+	pl := a.pl
+	tr := pl.Current()
+	a.tickTimes(c)
+	edge := ui.Box(c.Key("bottom-edge")).Absolute().Left(0).Right(0).Bottom(0).Height(mobilePlayerBarHeight).
+		Material(glass.ScrollEdge{Hard: true, Bottom: true, Background: p.bg})
+	edge.Opacity(edgeShown(edge, a.underBottom))
+	ui.Row(c).Absolute().Left(0).Right(0).Bottom(0).Height(mobilePlayerBarHeight).PaddingX(10).Gap(2).AlignItems(ui.Center).Children(func() {
+		if tr == nil {
+			ui.Row(c).Grow(1).Gap(10).AlignItems(ui.Center).Children(func() {
+				ui.Box(c).Size(42, 42).Radius(7).Background(p.hover).Center().Children(func() {
+					ui.Icon(c, iconNote).Size(16, 16).TextColor(p.faint)
+				})
+				ui.Text(c, T("Not Playing")).FontSize(13).TextColor(p.muted)
+			})
+			return
+		}
+		info := ui.ButtonBase(c.Key("info")).Grow(1).Basis(0).MinWidth(0).Gap(10).AlignItems(ui.Center).FocusRing(false).Label(T("Open Now Playing"))
+		info.Children(func() {
+			mini := ui.Box(c.Key("mini-cover")).Size(42, 42).Shrink(0)
+			if b := mini.LayoutBounds(); b.W > 0 {
+				a.npFrom = b
+			}
+			if a.npT > 0 && !a.npStill {
+				mini.Opacity(0)
+			}
+			mini.Children(func() { a.cover(c, tr.Album.ImageURL, 120, 42, npFromRadius) })
+			ui.Column(c).Shrink(1).MinWidth(0).Gap(2).Children(func() {
+				ui.Text(c, tr.Name).FontSize(13.5).FontWeight(600).SingleLine()
+				var sub string
+				color := p.muted
+				switch {
+				case pl.Loading():
+					sub = T("Buffering…")
+				case pl.Err() != "":
+					sub, color = pl.Err(), p.accent
+				}
+				if sub == "" {
+					a.artistLinks(c, tr, p.muted, p.text).FontSize(11.5).SingleLine()
+				} else {
+					ui.Text(c, sub).FontSize(11.5).TextColor(color).SingleLine()
+				}
+			})
+		})
+		if info.Clicked() {
+			a.nowPlaying = true
+		}
+		a.likeButton(c.Key("like"), tr, 16, p.muted).Shrink(0)
+		if playButton(c.Key("play"), pl.Playing(), 18, p.text).Clicked() {
+			pl.TogglePlay()
+		}
+		if iconButton(c.Key("next"), iconNext, 17, p.text, T("Next")).Clicked() {
+			pl.Next()
+		}
+	})
+	// Along the top edge, where a thumb reaches for it.
+	if tr != nil {
+		a.scrubber(c.Key("bar-scrub"), &a.barScrub, p.press, p.text.Alpha(0.75), 10, p.accent).
+			Absolute().Left(6).Right(6).Bottom(mobilePlayerBarHeight - 11).Height(10)
+	}
 }

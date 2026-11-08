@@ -132,10 +132,10 @@ func (a *app) playlistCardsSkeleton(c *ui.Context, s shimmer, n int, min float32
 // the header, which may hold blocks of its own.
 func (a *app) trackSkeleton(c *ui.Context, s shimmer, covers bool, header func(c *ui.Context)) {
 	w, h := c.Size()
-	wide := w-sidebarWidth > 820
+	wide := !a.mobile(c) && w-sidebarWidth > 820
 	top, bottom := a.insets(c)
 	a.underTop, a.underBottom = false, true
-	ui.Column(c.Key("skeleton")).Grow(1).Padding(top+pageGap, pagePad-12, bottom+32, pagePad-12).Children(func() {
+	ui.Column(c.Key("skeleton")).Grow(1).Padding(top+pageGap, a.pagePadding(c)-12, bottom+32, a.pagePadding(c)-12).Children(func() {
 		a.startMark(c)
 		header(c)
 		for i := range max(8, int(h/54)) {
@@ -162,8 +162,8 @@ func (a *app) trackSkeleton(c *ui.Context, s shimmer, covers bool, header func(c
 
 // playlistHeaderSkeleton is playlistHeader while the playlist loads.
 func (a *app) playlistHeaderSkeleton(c *ui.Context, s shimmer) {
-	ui.Row(c).Gap(28).AlignItems(ui.End).Padding(0, 0, 26, 0).Children(func() {
-		s.bone(c, 14).Size(212, 212)
+	ui.Row(c).Gap(a.headerGap(c)).AlignItems(ui.End).Padding(0, 0, 26, 0).Children(func() {
+		s.bone(c, 14).Size(a.headerCover(c), a.headerCover(c))
 		ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Gap(8).Children(func() {
 			s.text(c, 12, 1.3).Width(36)
 			s.text(c, 30, 1.2).WidthPercent(48)

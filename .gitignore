@@ -3,3 +3,8 @@
 mygo_windows_*.syso
 /mygo-music
 /node_modules/
+/web/app.wasm
+/web/app.wasm.gz
+/web/wasm_exec.js
+/data/
+/dist/

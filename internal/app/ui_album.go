@@ -64,13 +64,15 @@ func (a *app) albumHeader(c *ui.Context, d *albumData) {
 	p := a.pal
 	al := &d.album.Album
 	tracks := d.album.Tracks
-	ui.Row(c).Gap(28).AlignItems(ui.End).Padding(0, 0, 26, 0).Children(func() {
-		ui.Box(c).Size(212, 212).Radius(14).Shadow(0, 18, 40, -10, p.cardShade).Children(func() {
+	cover := a.headerCover(c)
+	titleSize := a.pageTitleSize(c)
+	ui.Row(c).Gap(a.headerGap(c)).AlignItems(ui.End).Padding(0, 0, 26, 0).Children(func() {
+		ui.Box(c).Size(cover, cover).Radius(14).Shadow(0, 18, 40, -10, p.cardShade).Children(func() {
 			a.coverFill(c, al.ImageURL, 600, 14)
 		})
 		ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Gap(8).Children(func() {
 			ui.Text(c, T("Album")).FontSize(12).FontWeight(600).TextColor(p.accent)
-			ui.Text(c, al.Name).FontSize(30).FontWeight(800).LetterSpacing(-0.6).MaxLines(2).LineHeight(1.2)
+			ui.Text(c, al.Name).FontSize(titleSize).FontWeight(800).LetterSpacing(-0.6).MaxLines(2).LineHeight(1.2)
 			ui.RichText(c).FontSize(13).TextColor(p.muted).Children(func() {
 				for i, ar := range al.Artists {
 					if i > 0 {
@@ -92,7 +94,7 @@ func (a *app) albumHeader(c *ui.Context, d *albumData) {
 				}
 				ui.Text(c, sep+strings.Join(meta, " · "))
 			})
-			ui.Row(c).Gap(10).Margin(10, 0, 0, 0).Children(func() {
+			ui.Row(c).Gap(10).Wrap().Margin(10, 0, 0, 0).Children(func() {
 				a.playButtons(c, tracks)
 				if a.can("saveAlbum") {
 					icon, label := iconPlus, TC("Save", "library")

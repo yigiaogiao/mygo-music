@@ -172,6 +172,9 @@ func (a *app) npFromRect(w, h float32) ui.Rect {
 	if a.npFrom.W > 0 {
 		return a.npFrom
 	}
+	if w < mobileBreakpoint {
+		return ui.Rect{X: 10, Y: h - (mobilePlayerBarHeight+42)/2, W: 42, H: 42}
+	}
 	return ui.Rect{X: sidebarWidth + 21, Y: h - (playerBarHeight+48)/2, W: 48, H: 48}
 }
 
@@ -310,6 +313,15 @@ func (a *app) nowPlayingBody(c *ui.Context, tr *music.Track, art *artwork, accen
 	if a.npPane != paneWall {
 		a.wallState.track = ""
 	}
+	// A phone stacks what plays over the pane, rather than setting them
+	// side by side, and keeps the stage and the wall, made for a desktop.
+	if a.mobile(c) {
+		if a.npPane == paneStage || a.npPane == paneWall {
+			a.npPane = paneLyrics
+		}
+		a.nowPlayingCompact(c, tr, art, accent, w, h)
+		return
+	}
 	{
 		// The top strip drags the window; the chevron closes the view,
 		// showing only while the pointer is in the window, as the pane tabs do.
@@ -429,6 +441,85 @@ func (a *app) nowPlayingBody(c *ui.Context, tr *music.Track, art *artwork, accen
 			})
 		})
 	}
+}
+
+// nowPlayingCompact lays Now Playing out for a narrow window: the cover
+// over what plays, its controls, and the pane under them, all in one
+// column, with the chevron to close always showing, as a phone has no
+// pointer to bring it out.
+func (a *app) nowPlayingCompact(c *ui.Context, tr *music.Track, art *artwork, accent ui.Color, w, h float32) {
+	pl := a.pl
+	const pad = 16
+	cover := float32(0)
+	if h >= 560 {
+		cover = min(w-2*pad, h*0.32, 300)
+		if cover < 120 {
+			cover = 0
+		}
+	}
+	ui.Column(c).Absolute().Top(0).Left(0).Right(0).Bottom(0).Padding(topBar(c)+2, pad, 10, pad).Children(func() {
+		ui.Row(c).Height(28).Justify(ui.Center).Children(func() {
+			if iconButton(c.Key("close"), iconDown, 22, white.Alpha(0.7), T("Close")).Clicked() {
+				a.nowPlaying = false
+			}
+		})
+		if cover > 0 {
+			a.npRise(ui.Row(c).Justify(ui.Center).Margin(2, 0, 14, 0), 0).Children(func() {
+				a.npCover(c, tr, art, cover)
+			})
+		}
+		a.npRise(ui.Row(c).Gap(8).AlignItems(ui.Center).Margin(0, 0, 10, 0), 1).Children(func() {
+			ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Gap(3).Children(func() {
+				if r := pl.Radio(); r != "" {
+					a.radioChip(c, r)
+				}
+				ui.Text(c, tr.Name).FontSize(18).FontWeight(700).LetterSpacing(-0.2).SingleLine()
+				a.artistLinks(c, tr, white.Alpha(0.6), white, true).FontSize(13).SingleLine()
+			})
+			a.likeButton(c.Key("like"), tr, 20, white.Alpha(0.7))
+			a.songMenu(c.Key("more"), tr, 20, white.Alpha(0.7)).Margin(0, -6, 0, 0)
+		})
+		a.npRise(a.scrubber(c.Key("np-scrub"), &a.npScrub, white.Alpha(0.18), white.Alpha(0.9), 16, accent.Mix(white, 0.35)), 2)
+		a.npRise(ui.Row(c).Height(16).AlignItems(ui.Center), 2).Children(func() {
+			ui.Text(c, clock(pl.Position())).FontSize(11).FontFeatures("tnum").TextColor(white.Alpha(0.5))
+			ui.Spacer(c)
+			qualityBadge(c, pl.Stream())
+			ui.Spacer(c)
+			status := "-" + clock(pl.Duration()-pl.Position())
+			if pl.Loading() {
+				status = T("Buffering…")
+			}
+			ui.Text(c, status).FontSize(11).FontFeatures("tnum").TextColor(white.Alpha(0.5))
+		})
+		a.npRise(ui.Box(c).Margin(6, 0, 8, 0), 3).Children(func() {
+			a.transport(c, white, white.Alpha(0.45), accent, 24)
+		})
+		tabs := ui.Row(c).Height(npTabsHeight).Gap(4).AlignItems(ui.Center).ClipX()
+		a.npRise(tabs, 0).Children(func() {
+			for _, t := range a.npTabs() {
+				if t.pane == paneStage || t.pane == paneWall {
+					continue
+				}
+				a.paneTab(c, t.pane, t.label)
+			}
+		})
+		pane := ui.Column(c.Key("pane")).Grow(1).Basis(0).MinWidth(0)
+		a.npRise(pane, 2)
+		pane.Children(func() {
+			switch a.npPane {
+			case paneComments:
+				a.commentsPane(c, tr)
+			case paneShow:
+				a.showPane(c, tr)
+			case paneCaptions:
+				a.captionsPane(c, tr, h)
+			case paneQueue:
+				a.queuePane(c)
+			default:
+				a.lyricsPane(c, tr, h)
+			}
+		})
+	})
 }
 
 // npMaxWidth is how wide the cover and the pane beside it go, at most.

@@ -15,10 +15,17 @@ import (
 	"mygo-music/internal/local"
 	"mygo-music/internal/music"
 	"mygo-music/internal/plugin"
+	"mygo-music/internal/websource"
 )
 
 // openSettings shows the settings window, opening it the first time.
 func (a *app) openSettings() {
+	if webBuild() {
+		// The browser has no second window: a sheet over the page instead,
+		// where it also works on a phone.
+		a.settingsOpen, a.navOpen = true, false
+		return
+	}
 	if a.win == nil {
 		return // no app to show a window in, as in tests
 	}
@@ -225,6 +232,66 @@ func (a *app) settingsView(c *ui.Context) {
 	a.signInDialog(c, p, true)
 }
 
+// settingsSheet shows the settings over the page, in the browser, where
+// there is no second window for them: a list of the pages down the side in
+// a wide window, or as chips that scroll sideways in a narrow one.
+func (a *app) settingsSheet(c *ui.Context) {
+	p := a.pal
+	sections := a.settingsSections(c, p)
+	current := sections[0]
+	for _, sec := range sections {
+		if sec.id == a.settingsPage {
+			current = sec
+		}
+	}
+	top := topBar(c)
+	mobile := a.mobile(c)
+	pad := float32(28)
+	if mobile {
+		pad = 14
+	}
+	ui.Box(c.Key("settings-sheet")).Absolute().Top(0).Left(0).Right(0).Bottom(0).Background(p.bg).Children(func() {
+		header := ui.Row(c.Key("header")).Absolute().Top(0).Left(0).Right(0).Height(top).Padding(0, 14, 0, 14).AlignItems(ui.Center).DragWindow()
+		header.Children(func() {
+			ui.Text(c, T("Settings")).FontSize(15).FontWeight(700).SingleLine().Shrink(1).MinWidth(0)
+			ui.Box(c).Grow(1)
+			if iconButton(c.Key("close"), iconX, 17, p.muted, T("Close")).Clicked() {
+				a.settingsOpen = false
+			}
+		})
+		ui.Column(c).Absolute().Top(top).Left(0).Right(0).Bottom(0).Children(func() {
+			if mobile {
+				ui.ScrollHorizontal(c.Key("picks")).Height(46).TrackScroll(&a.settingsPick).Children(func() {
+					ui.Row(c).Padding(0, pad).Gap(6).AlignItems(ui.Center).Children(func() {
+						for _, sec := range sections {
+							a.settingsNavItem(c, p, sec, sec.id == current.id)
+						}
+					})
+				})
+				ui.Scroll(c.Key(current.id+"\x00sheet")).Grow(1).TrackScroll(&a.settingsScroll).
+					Padding(4, pad, 24, pad).Gap(8).Children(func() {
+					ui.Text(c, current.title).FontSize(22).FontWeight(700).LetterSpacing(-0.3).Margin(0, 0, 8, 0)
+					a.settingsGroup(c, p, current, "", "")
+				})
+				return
+			}
+			ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
+				ui.Column(c).Width(settingsSidebarWidth).Shrink(0).Padding(12, 12, 14, 12).Gap(2).Background(p.sidebar).Children(func() {
+					for _, sec := range sections {
+						a.settingsNavItem(c, p, sec, sec.id == current.id)
+					}
+				})
+				ui.Box(c).Width(1).Shrink(0).Background(p.hairline)
+				ui.Scroll(c.Key(current.id+"\x00sheet")).Grow(1).MinWidth(0).TrackScroll(&a.settingsScroll).
+					Padding(28, 28, 32, 28).Gap(8).Children(func() {
+					ui.Text(c, current.title).FontSize(22).FontWeight(700).LetterSpacing(-0.3).Margin(0, 0, 8, 0)
+					a.settingsGroup(c, p, current, "", "")
+				})
+			})
+		})
+	})
+}
+
 // settingsSidebarWidth is the width of the list of the settings' pages.
 const settingsSidebarWidth = 200
 
@@ -375,7 +442,11 @@ func (a *app) settingsSections(c *ui.Context, p palette) []settingsSection {
 		}
 	})
 
-	add("plugins", T("Plugins"), iconPlug, func(row settingsRow, block settingsBlock) { a.sourceSettings(c, row, block, p) })
+	sourceTitle, sourceIcon := T("Plugins"), iconPlug
+	if webBuild() {
+		sourceTitle, sourceIcon = T("Music Source"), iconDatabase
+	}
+	add("plugins", sourceTitle, sourceIcon, func(row settingsRow, block settingsBlock) { a.sourceSettings(c, row, block, p) })
 
 	// Only on macOS, the one with a notch player.
 	if a.notch != nil {
@@ -428,28 +499,30 @@ func (a *app) settingsSections(c *ui.Context, p palette) []settingsSection {
 		})
 	})
 
-	add("cache", T("Cache"), iconDatabase, func(row settingsRow, block settingsBlock) {
-		row(T("Song Cache"), Tf("Songs from elsewhere are kept here to play again at once, without the network. %s", a.cacheUsage()), func() {
-			labels := make([]string, len(cacheLimits))
-			at := 2
-			for i, l := range cacheLimits {
-				labels[i] = l.label
-				if l.mb == s.CacheMB {
-					at = i
+	if !webBuild() {
+		add("cache", T("Cache"), iconDatabase, func(row settingsRow, block settingsBlock) {
+			row(T("Song Cache"), Tf("Songs from elsewhere are kept here to play again at once, without the network. %s", a.cacheUsage()), func() {
+				labels := make([]string, len(cacheLimits))
+				at := 2
+				for i, l := range cacheLimits {
+					labels[i] = l.label
+					if l.mb == s.CacheMB {
+						at = i
+					}
 				}
-			}
-			if i, ok := choice(c, "cache", T("Song Cache"), labels, at); ok {
-				s.CacheMB = cacheLimits[i].mb
-				a.changed()
-				a.applyCacheLimit()
-			}
+				if i, ok := choice(c, "cache", T("Song Cache"), labels, at); ok {
+					s.CacheMB = cacheLimits[i].mb
+					a.changed()
+					a.applyCacheLimit()
+				}
+			})
+			row(T("Clear the Cache"), T("Delete all the songs kept here"), func() {
+				if ui.Button(c.Key("clear-cache"), T("Clear")).Disabled(a.cacheUsed <= 0).Clicked() {
+					a.clearCache()
+				}
+			})
 		})
-		row(T("Clear the Cache"), T("Delete all the songs kept here"), func() {
-			if ui.Button(c.Key("clear-cache"), T("Clear")).Disabled(a.cacheUsed <= 0).Clicked() {
-				a.clearCache()
-			}
-		})
-	})
+	}
 
 	if a.captionsShown() && a.anyCan("shows") {
 		add("podcasts", T("Podcasts"), iconPodcast, func(row settingsRow, block settingsBlock) { a.captionSettings(row, c) })
@@ -519,12 +592,57 @@ func (a *app) sourceSettings(c *ui.Context, row settingsRow, block settingsBlock
 			a.localSettings(c, lib, row, block, p)
 			continue
 		}
+		if w, ok := lib.src.(*websource.Source); ok {
+			a.webSettings(c, lib, w, row, block, p)
+			continue
+		}
 		text := lib.name()
 		for _, st := range lib.src.Info().Settings {
 			text += " " + st.Label + " " + st.Help
 		}
 		block(text, func() { a.pluginSettings(c.Key(lib.id), lib, p) })
 	}
+}
+
+// webSettings are the folders of the server the browser app reads, which are
+// chosen on the server's own page.
+func (a *app) webSettings(c *ui.Context, lib *library, w *websource.Source, row settingsRow, block settingsBlock, p palette) {
+	st := w.Status()
+	desc := T("Music from the netdisk")
+	switch {
+	case st.Scanning:
+		desc = T("Looking for music…")
+	case st.Tracks > 0:
+		desc = Tf("%d songs found", st.Tracks)
+	case len(st.Folders) == 0:
+		desc = T("Choose a folder to play from")
+	}
+	row(T("Netdisk Music"), T("Built-in")+" · "+desc, func() {
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+			if ui.Button(c.Key("rescan"), T("Rescan")).Disabled(st.Scanning).Clicked() {
+				go func() {
+					if err := w.Rescan(); err != nil {
+						a.post(func() { a.actionFailed(lib, err, T("Couldn't rescan the folders")) })
+					}
+				}()
+			}
+			if ui.Button(c.Key("choose-folders"), T("Choose Folders")).Clicked() {
+				mygo.Shell.OpenExternal(w.SetupURL())
+			}
+		})
+	})
+	for _, dir := range st.Folders {
+		block(dir, func() {
+			ui.Row(c.Key(dir)).Padding(8, 16).Gap(10).AlignItems(ui.Center).Children(func() {
+				ui.Icon(c, iconFolder).Size(15, 15).TextColor(p.muted)
+				ui.Text(c, dir).FontSize(12.5).SingleLine().Grow(1).Shrink(1).MinWidth(0)
+			})
+		})
+	}
+	block(T("About the Netdisk"), func() {
+		ui.Text(c, T("The player reads the folders you choose on the netdisk, without copying them. Add or remove folders on the server's page.")).
+			FontSize(12).TextColor(p.muted).LineHeight(1.45)
+	})
 }
 
 // revealFolder shows a folder in the file manager, making it if need be;

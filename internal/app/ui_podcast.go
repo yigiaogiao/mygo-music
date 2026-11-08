@@ -136,13 +136,13 @@ func (a *app) showPage(c *ui.Context) {
 	show := d.show
 	cur := a.pl.Current()
 	a.scrollPage(c, func() {
-		ui.Row(c).Gap(28).AlignItems(ui.End).Padding(0, 0, 8, 0).Children(func() {
-			ui.Box(c).Size(212, 212).Radius(14).Shadow(0, 18, 40, -10, p.cardShade).Children(func() {
+		ui.Row(c).Gap(a.headerGap(c)).AlignItems(ui.End).Padding(0, 0, 8, 0).Children(func() {
+			ui.Box(c).Size(a.headerCover(c), a.headerCover(c)).Radius(14).Shadow(0, 18, 40, -10, p.cardShade).Children(func() {
 				a.coverFill(c, show.ImageURL, 600, 14)
 			})
 			ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Gap(8).Children(func() {
 				ui.Text(c, T("Podcast")).FontSize(12).FontWeight(600).TextColor(p.accent)
-				ui.Text(c, show.Name).FontSize(30).FontWeight(800).LetterSpacing(-0.6).MaxLines(2).LineHeight(1.2)
+				ui.Text(c, show.Name).FontSize(a.pageTitleSize(c)).FontWeight(800).LetterSpacing(-0.6).MaxLines(2).LineHeight(1.2)
 				// Who publishes it opens their page, if the source has one.
 				ui.RichText(c).FontSize(13).TextColor(p.muted).Children(func() {
 					if show.Publisher != "" {
@@ -310,7 +310,7 @@ func (a *app) showsPage(c *ui.Context) {
 		return
 	}
 	top, bottom := a.insets(c)
-	ui.Scroll(c.Key(a.route)).TrackScroll(&a.pageScroll).Grow(1).Padding(top+pageGap, pagePad, bottom+48, pagePad).ScrollbarInsets(top, 0, bottom, 0).Children(func() {
+	ui.Scroll(c.Key(a.route)).TrackScroll(&a.pageScroll).Grow(1).Padding(top+pageGap, a.pagePadding(c), bottom+48, a.pagePadding(c)).ScrollbarInsets(top, 0, bottom, 0).Children(func() {
 		a.startMark(c)
 		defer a.endMark(c)
 		a.heading(c, a.builtinTitle("shows"), "")

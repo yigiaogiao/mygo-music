@@ -1,0 +1,22 @@
+application:
+  image: embed:mygo-music
+  subdomain: mygo-music
+  multi_instance: false
+  workdir: /app
+  environment:
+    DATA_DIR: /lzcapp/var/data
+    MUSIC_DIR: /lzcapp/media/RemoteFS
+    WEB_DIR: /app/web
+    ONLINE_LYRICS: "true"
+    ADDR: ":8090"
+  health_check:
+    test_url: http://localhost:8090/api/health
+    start_period: 30s
+    timeout: 5s
+  upstreams:
+    - location: /
+      backend: http://localhost:8090
+
+# Mounts the netdisk under /lzcapp/media/RemoteFS, read-only.
+ext_config:
+  enable_media_access: true

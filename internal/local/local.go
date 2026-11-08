@@ -163,6 +163,16 @@ func (s *Source) Scanning() bool {
 // TrackCount is how many tracks are listed now.
 func (s *Source) TrackCount() int { return len(s.cat.Load().items) }
 
+// Track returns the track with id, for what a source says of it beyond its
+// ID, as finding its lyrics online takes.
+func (s *Source) Track(id string) (music.Track, bool) {
+	it, ok := s.cat.Load().byID[id]
+	if !ok {
+		return music.Track{}, false
+	}
+	return it.public(), true
+}
+
 func (s *Source) Info() music.Info {
 	return music.Info{
 		ID:       ID,

@@ -12,6 +12,27 @@ import (
 
 const sidebarWidth = 232
 
+// mobileBreakpoint is the width below which the window is laid out as a
+// phone's: the sidebar in a drawer, the player bar compact, and one column
+// where there were several.
+const mobileBreakpoint = 760
+
+// mobile reports whether the window is narrow enough to lay out as a
+// phone's.
+func (a *app) mobile(c *ui.Context) bool {
+	w, _ := c.Size()
+	return w < mobileBreakpoint
+}
+
+// sidebarRoom is the width the sidebar takes from a page, none where it
+// shows in a drawer.
+func (a *app) sidebarRoom(c *ui.Context) float32 {
+	if a.mobile(c) {
+		return 0
+	}
+	return sidebarWidth
+}
+
 func (a *app) view(c *ui.Context) {
 	t := *c.Theme()
 	a.pal = paletteFor(&t)
@@ -55,11 +76,14 @@ func (a *app) view(c *ui.Context) {
 				// trackList), so it shows again as it was.
 				return
 			}
-			side := ui.Column(c).Width(sidebarWidth)
-			if !c.Vibrancy() {
-				side.Background(p.sidebar)
+			// A narrow window keeps the sidebar in a drawer over the page.
+			if !a.mobile(c) {
+				side := ui.Column(c).Width(sidebarWidth)
+				if !c.Vibrancy() {
+					side.Background(p.sidebar)
+				}
+				side.Children(func() { a.sidebar(c) })
 			}
-			side.Children(func() { a.sidebar(c) })
 			// Keyed, so that a popover of the sidebar opening or closing
 			// keeps what the page and its bars hold, their edges' fades.
 			ui.Box(c.Key("main")).Grow(1).Background(p.bg).Children(func() {
@@ -70,6 +94,12 @@ func (a *app) view(c *ui.Context) {
 				a.playerBar(c)
 			})
 		})
+		if a.mobile(c) && a.navOpen && !(npOpen && npSettled) {
+			a.navDrawer(c)
+		}
+		if a.settingsOpen && !(npOpen && npSettled) {
+			a.settingsSheet(c)
+		}
 		a.nowPlayingLayer(c, npOpen, npSettled)
 	})
 	a.signInDialog(c, a.pal, false)
@@ -94,6 +124,12 @@ func (a *app) shortcuts(c *ui.Context) {
 		a.nowPlaying = false
 		a.searchBox.Focus(c)
 	})
+	if a.settingsOpen {
+		c.OnShortcut(0, ui.KeyEscape, func() { a.settingsOpen = false })
+	}
+	if a.navOpen {
+		c.OnShortcut(0, ui.KeyEscape, func() { a.navOpen = false })
+	}
 	if a.nowPlaying {
 		c.OnShortcut(0, ui.KeyEscape, func() { a.nowPlaying = false })
 		// ⌘ and a number choose Now Playing's tab of that place.
@@ -110,6 +146,8 @@ func (a *app) shortcuts(c *ui.Context) {
 // source makes that source the active one.
 func (a *app) open(r route) {
 	a.nowPlaying = false
+	a.navOpen = false
+	a.settingsOpen = false
 	if r.src == "" {
 		r.src = a.route.src
 	}
@@ -184,6 +222,14 @@ func (a *app) load(r route) {
 // back goes to the page before, as the back button of a mouse does, or
 // closes Now Playing, which covers the pages.
 func (a *app) back() {
+	if a.settingsOpen {
+		a.settingsOpen = false
+		return
+	}
+	if a.navOpen {
+		a.navOpen = false
+		return
+	}
 	if a.nowPlaying {
 		a.nowPlaying = false
 		return
@@ -242,6 +288,24 @@ func (a *app) sidebar(c *ui.Context) {
 	})
 }
 
+// navDrawer shows the sidebar over a page in a narrow window, with the page
+// dimmed behind it. A tap outside it closes it, as choosing an entry does.
+func (a *app) navDrawer(c *ui.Context) {
+	p := a.pal
+	w, _ := c.Size()
+	width := min(w*0.86, 320)
+	backdrop := ui.Box(c.Key("nav-backdrop")).Absolute().Top(0).Left(0).Right(0).Bottom(0).Background(ui.RGBA(0, 0, 0, 0.42))
+	backdrop.HandleInput(func(ev ui.InputEvent) bool {
+		switch ev.Kind {
+		case ui.InputPointerDown, ui.InputPointerUp:
+			a.navOpen = false
+		}
+		return true
+	})
+	ui.Column(c.Key("nav-drawer")).Absolute().Top(0).Left(0).Bottom(0).Width(width).Background(p.sidebar).
+		Shadow(2, 0, 28, 0, ui.RGBA(0, 0, 0, 0.36)).Children(func() { a.sidebar(c) })
+}
+
 func (a *app) navItem(c *ui.Context, icon *ui.SVG, label string, r route) {
 	p := a.pal
 	selected := a.route.page == r.page && !a.nowPlaying && (r.page != pageBrowse || a.route.id == r.id)
@@ -291,7 +355,16 @@ func (a *app) insets(c *ui.Context) (top, bottom float32) {
 		// The edge reaches a little below the traffic lights' strip.
 		top += topEdgePad
 	}
-	return top, playerBarHeight
+	return top, a.playerBarHeight(c)
+}
+
+// playerBarHeight returns the height of the player bar, shorter where the
+// window is narrow.
+func (a *app) playerBarHeight(c *ui.Context) float32 {
+	if a.mobile(c) {
+		return mobilePlayerBarHeight
+	}
+	return playerBarHeight
 }
 
 // topEdgePad is the room the edge over a page leaves below the strip, on
@@ -358,17 +431,30 @@ func (a *app) pageTop(c *ui.Context) {
 		Material(glass.ScrollEdge{Hard: true, Background: a.pal.bg})
 	// The pointer over it brings the edge up too, as AppKit's does.
 	edge.Opacity(edgeShown(edge, a.underTop || edge.Hovered()))
-	if len(a.history) > 0 || len(a.forward) > 0 {
-		ui.Row(c).Absolute().Top(0).Left(20).Height(topBar(c)).AlignItems(ui.Center).Children(func() {
-			back := iconButton(c.Key("back"), iconBack, 18, a.pal.muted, T("Back")).Disabled(len(a.history) == 0)
-			if len(a.history) == 0 {
-				back.Opacity(0.35)
+	mobile := a.mobile(c)
+	if mobile || len(a.history) > 0 || len(a.forward) > 0 {
+		left := float32(20)
+		if mobile {
+			// Room for the drawer's button at the edge.
+			left = 8
+		}
+		ui.Row(c).Absolute().Top(0).Left(left).Height(topBar(c)).AlignItems(ui.Center).Children(func() {
+			if mobile {
+				if iconButton(c.Key("menu"), iconMenu, 19, a.pal.text, T("Menu")).Clicked() {
+					a.navOpen = !a.navOpen
+				}
 			}
-			if back.Clicked() {
-				a.back()
-			}
-			if len(a.forward) > 0 && iconButton(c.Key("forward"), iconForward, 18, a.pal.muted, T("Forward")).Clicked() {
-				a.goForward()
+			if len(a.history) > 0 || len(a.forward) > 0 {
+				back := iconButton(c.Key("back"), iconBack, 18, a.pal.muted, T("Back")).Disabled(len(a.history) == 0)
+				if len(a.history) == 0 {
+					back.Opacity(0.35)
+				}
+				if back.Clicked() {
+					a.back()
+				}
+				if len(a.forward) > 0 && iconButton(c.Key("forward"), iconForward, 18, a.pal.muted, T("Forward")).Clicked() {
+					a.goForward()
+				}
 			}
 		})
 	}

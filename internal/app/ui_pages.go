@@ -5,29 +5,73 @@ import (
 	"strings"
 	"time"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
 	"mygo-music/internal/i18n"
 	"mygo-music/internal/local"
 	"mygo-music/internal/music"
 	"mygo-music/internal/player"
+	"mygo-music/internal/websource"
 )
 
 const pagePad = 40
 
+// pagePadding is the room a page keeps at its sides: less where the window
+// is narrow.
+func (a *app) pagePadding(c *ui.Context) float32 {
+	if a.mobile(c) {
+		return 14
+	}
+	return pagePad
+}
+
+// headerCover is the size of the cover atop a page, smaller where the
+// window is narrow, to leave its title and buttons room beside it.
+func (a *app) headerCover(c *ui.Context) float32 {
+	if a.mobile(c) {
+		return 132
+	}
+	return 212
+}
+
+// headerGap is the room between a page header's cover and what it says.
+func (a *app) headerGap(c *ui.Context) float32 {
+	if a.mobile(c) {
+		return 16
+	}
+	return 28
+}
+
+// pageTitleSize is the size of the title atop a page.
+func (a *app) pageTitleSize(c *ui.Context) float32 {
+	if a.mobile(c) {
+		return 24
+	}
+	return 30
+}
+
 // columns returns how many cards of at least min DIPs fit across the page.
 func (a *app) columns(c *ui.Context, min float32) int {
 	w, _ := c.Size()
-	inner := w - sidebarWidth - 2*pagePad
-	return max(2, int((inner+20)/(min+20)))
+	inner := w - a.sidebarRoom(c) - 2*a.pagePadding(c)
+	n := int((inner + 20) / (min + 20))
+	if a.mobile(c) {
+		return max(1, n)
+	}
+	return max(2, n)
 }
 
 func (a *app) heading(c *ui.Context, title, sub string) {
+	size := float32(30)
+	if a.mobile(c) {
+		size = 24
+	}
 	ui.Column(c).Gap(4).Margin(0, 0, 18, 0).Children(func() {
 		if sub != "" {
 			ui.Text(c, sub).FontSize(12).FontWeight(600).TextColor(a.pal.muted).LetterSpacing(0.4)
 		}
-		ui.Text(c, title).FontSize(30).FontWeight(700).LetterSpacing(-0.6)
+		ui.Text(c, title).FontSize(size).FontWeight(700).LetterSpacing(-0.6)
 	})
 }
 
@@ -67,7 +111,7 @@ func (a *app) homePage(c *ui.Context) {
 		return
 	}
 	top, bottom := a.insets(c)
-	ui.Scroll(c.Key(a.route)).TrackScroll(&a.pageScroll).Grow(1).Padding(top+pageGap, pagePad-12, bottom+48, pagePad-12).ScrollbarInsets(top, 0, bottom, 0).Children(func() {
+	ui.Scroll(c.Key(a.route)).TrackScroll(&a.pageScroll).Grow(1).Padding(top+pageGap, a.pagePadding(c)-12, bottom+48, a.pagePadding(c)-12).ScrollbarInsets(top, 0, bottom, 0).Children(func() {
 		a.startMark(c)
 		defer a.endMark(c)
 		ui.Box(c).PaddingX(12).Children(func() { a.homeHello(c, now) })
@@ -117,6 +161,12 @@ func (a *app) addMusicFolder() {
 }
 
 // emptyHome invites the listener to do what gets the source going.
+// isWebLib reports whether lib is the browser's server source.
+func isWebLib(lib *library) bool {
+	_, ok := lib.src.(*websource.Source)
+	return ok
+}
+
 func (a *app) emptyHome(c *ui.Context) {
 	p := a.pal
 	lib := a.library
@@ -124,12 +174,34 @@ func (a *app) emptyHome(c *ui.Context) {
 	ui.Column(c.Key("empty-home")).Grow(1).Padding(top, 40, bottom, 40).Center().Gap(10).Children(func() {
 		ui.Box(c).Size(72, 72).Radius(20).Center().Background(p.hover).Margin(0, 0, 8, 0).Children(func() {
 			icon := iconNote
-			if lib.id == local.ID {
+			if lib.id == local.ID || isWebLib(lib) {
 				icon = iconFolder
 			}
 			ui.Icon(c, icon).Size(32, 32).TextColor(p.muted)
 		})
 		switch {
+		case isWebLib(lib):
+			w := lib.src.(*websource.Source)
+			st := w.Status()
+			switch {
+			case st.Scanning:
+				ui.Text(c, T("Looking for music…")).FontSize(22).FontWeight(700).LetterSpacing(-0.3)
+				ui.Text(c, T("Songs will show here as they're found.")).FontSize(13.5).TextColor(p.muted).TextAlign(ui.Center)
+			case len(st.Folders) == 0:
+				ui.Text(c, T("Choose a music folder")).FontSize(22).FontWeight(700).LetterSpacing(-0.3)
+				ui.Text(c, T("Pick the folders on your LazyCat netdisk, and their songs will all be here.")).
+					FontSize(13.5).TextColor(p.muted).TextAlign(ui.Center).MaxWidth(420).LineHeight(1.45)
+				if pillButton(c.Key("choose-folders"), iconFolder, T("Choose Folders"), p.accent, p.onAccent).Margin(10, 0, 0, 0).Clicked() {
+					mygo.Shell.OpenExternal(w.SetupURL())
+				}
+			default:
+				ui.Text(c, T("No music found")).FontSize(22).FontWeight(700).LetterSpacing(-0.3)
+				ui.Text(c, T("There are no music files in the folders you chose. Try another.")).
+					FontSize(13.5).TextColor(p.muted).TextAlign(ui.Center).MaxWidth(420).LineHeight(1.45)
+				if pillButton(c.Key("choose-folders"), iconFolder, T("Choose Folders"), p.accent, p.onAccent).Margin(10, 0, 0, 0).Clicked() {
+					mygo.Shell.OpenExternal(w.SetupURL())
+				}
+			}
 		case lib.id == local.ID && a.local != nil && a.local.Scanning():
 			ui.Text(c, T("Looking for music…")).FontSize(22).FontWeight(700).LetterSpacing(-0.3)
 			ui.Text(c, T("Songs will show here as they're found.")).FontSize(13.5).TextColor(p.muted).TextAlign(ui.Center)
@@ -275,13 +347,15 @@ func (a *app) playlistPage(c *ui.Context) {
 
 func (a *app) playlistHeader(c *ui.Context, pl *music.Playlist) {
 	p := a.pal
-	ui.Row(c).Gap(28).AlignItems(ui.End).Padding(0, 0, 26, 0).Children(func() {
-		ui.Box(c).Size(212, 212).Radius(14).Shadow(0, 18, 40, -10, p.cardShade).Children(func() {
+	cover := a.headerCover(c)
+	titleSize := a.pageTitleSize(c)
+	ui.Row(c).Gap(a.headerGap(c)).AlignItems(ui.End).Padding(0, 0, 26, 0).Children(func() {
+		ui.Box(c).Size(cover, cover).Radius(14).Shadow(0, 18, 40, -10, p.cardShade).Children(func() {
 			a.coverFill(c, pl.ImageURL, 600, 14)
 		})
 		ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Gap(8).Children(func() {
 			ui.Text(c, T("Playlist")).FontSize(12).FontWeight(600).TextColor(p.accent)
-			ui.Text(c, pl.Name).FontSize(30).FontWeight(800).LetterSpacing(-0.6).MaxLines(2).LineHeight(1.2)
+			ui.Text(c, pl.Name).FontSize(titleSize).FontWeight(800).LetterSpacing(-0.6).MaxLines(2).LineHeight(1.2)
 			var meta []string
 			if pl.Owner != "" {
 				meta = append(meta, pl.Owner)
@@ -291,7 +365,7 @@ func (a *app) playlistHeader(c *ui.Context, pl *music.Playlist) {
 			if d := strings.TrimSpace(pl.Description); d != "" {
 				ui.Text(c, strings.ReplaceAll(d, "\n", " ")).FontSize(12.5).TextColor(p.muted).MaxLines(2).LineHeight(1.45).Margin(2, 0, 0, 0)
 			}
-			ui.Row(c).Gap(10).Margin(10, 0, 0, 0).Children(func() {
+			ui.Row(c).Gap(10).Wrap().Margin(10, 0, 0, 0).Children(func() {
 				a.playButtons(c, pl.Tracks)
 				if a.savable(pl) {
 					icon, label := iconPlus, TC("Save", "library")
@@ -331,18 +405,23 @@ func (a *app) likedPage(c *ui.Context) {
 	lib := a.library
 	header := func(c *ui.Context) {
 		p := a.pal
-		ui.Row(c).Gap(28).AlignItems(ui.End).Padding(0, 0, 26, 0).Children(func() {
-			ui.Box(c).Size(212, 212).Radius(14).Center().Shadow(0, 18, 40, -10, p.cardShade).TextColor(white).
+		cover := a.headerCover(c)
+		titleSize := float32(30)
+		if a.mobile(c) {
+			titleSize = 24
+		}
+		ui.Row(c).Gap(a.headerGap(c)).AlignItems(ui.End).Padding(0, 0, 26, 0).Children(func() {
+			ui.Box(c).Size(cover, cover).Radius(14).Center().Shadow(0, 18, 40, -10, p.cardShade).TextColor(white).
 				LinearGradient(ui.LinearGradient{Angle: 135, Oklab: true, From: ui.Oklch(0.72, 0.17, 10), To: ui.Oklch(0.58, 0.22, 350)}).
-				Children(func() { ui.Icon(c, iconHeartFill).Size(84, 84) })
+				Children(func() { ui.Icon(c, iconHeartFill).Size(cover*0.4, cover*0.4) })
 			ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Gap(8).Children(func() {
 				ui.Text(c, T("Playlist")).FontSize(12).FontWeight(600).TextColor(p.accent)
-				ui.Text(c, T("Liked Songs")).FontSize(30).FontWeight(800).LetterSpacing(-0.6)
+				ui.Text(c, T("Liked Songs")).FontSize(titleSize).FontWeight(800).LetterSpacing(-0.6)
 				if lib.likedPaged.loaded {
 					ui.Text(c, i18n.Songs(len(lib.likedList))).FontSize(13).TextColor(p.muted)
 				}
 				if len(lib.likedList) > 0 {
-					ui.Row(c).Gap(10).Margin(10, 0, 0, 0).Children(func() { a.playButtons(c, lib.likedList) })
+					ui.Row(c).Gap(10).Wrap().Margin(10, 0, 0, 0).Children(func() { a.playButtons(c, lib.likedList) })
 				}
 			})
 		})
@@ -460,7 +539,7 @@ func (a *app) trackRows(c *ui.Context, tracks []music.Track, covers bool, header
 			return
 		}
 		a.trackRow(c, tracks, i-1, covers, pid)
-	}).Grow(1).Padding(top+pageGap, pagePad-12, bottom+32, pagePad-12).ScrollbarInsets(top, 0, bottom, 0)
+	}).Grow(1).Padding(top+pageGap, a.pagePadding(c)-12, bottom+32, a.pagePadding(c)-12).ScrollbarInsets(top, 0, bottom, 0)
 }
 
 // sameTrack reports whether two tracks are one: IDs are their source's.
@@ -474,8 +553,9 @@ func (a *app) trackRow(c *ui.Context, tracks []music.Track, i int, covers bool, 
 	p := a.pal
 	tr := &tracks[i]
 	w, _ := c.Size()
+	mobile := a.mobile(c)
 	// An album's page has no column of the album its songs are on.
-	wide := w-sidebarWidth > 820 && a.route.page != pageAlbum
+	wide := !mobile && w-sidebarWidth > 820 && a.route.page != pageAlbum
 	playing := sameTrack(a.pl.Current(), tr)
 	row := ui.ButtonBase(c.Key(tr.ID)).Height(54).PaddingX(12).Gap(14).Radius(10).AlignItems(ui.Center).FocusRing(false).Label(tr.Name).
 		ContextMenu(a.songItems(tr, pid))
@@ -524,13 +604,20 @@ func (a *app) trackRow(c *ui.Context, tracks []music.Track, i int, covers bool, 
 				}
 			})
 		}
-		// A liked song's heart shows; the others' as the pointer is on them.
+		// A liked song's heart shows; the others' as the pointer is on them,
+		// and always on a phone, which has no pointer.
 		ui.Box(c).Size(32, 32).Center().Children(func() {
-			if a.isLiked(tr) || hovered {
+			if a.isLiked(tr) || hovered || mobile {
 				a.likeButton(c.Key("like"), tr, 15, p.muted)
 			}
 		})
-		ui.Text(c, clock(tr.Length())).FontSize(12.5).FontFeatures("tnum").TextColor(p.faint).Width(44).TextAlign(ui.End)
+		if mobile {
+			// The length makes way for the menu, which a phone reaches by
+			// touch rather than by a right click.
+			a.songMenu(c.Key("more"), tr, 15, p.faint).Shrink(0)
+		} else {
+			ui.Text(c, clock(tr.Length())).FontSize(12.5).FontFeatures("tnum").TextColor(p.faint).Width(44).TextAlign(ui.End)
+		}
 	})
 	if row.Clicked() && !tr.Unavailable {
 		a.pl.PlayTrack(tracks, i)
