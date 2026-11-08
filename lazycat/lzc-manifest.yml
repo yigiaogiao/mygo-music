@@ -8,8 +8,9 @@ application:
 
 services:
   music:
-    # No image is built for this app: the system's default Alpine runtime
-    # runs the static server binary from content.tar, at /lzcapp/pkg/content.
+    # No image is built for this app: an official LazyCat runtime pulls the
+    # static server binary from content.tar, at /lzcapp/pkg/content.
+    image: registry.lazycat.cloud/lzc/lzcapp:3.20.3
     entrypoint: /lzcapp/pkg/content/music-server
     binds:
       # /lzcapp/var survives restarts and upgrades; the server keeps the

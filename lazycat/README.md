@@ -22,7 +22,7 @@
 
 脚本会：编译 `linux/amd64` 的静态服务端、编译 WebAssembly 前端、把两者放进
 `lazycat/content/`，再调用 `lzc-cli project build`。产物在
-`lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.22.lpk`。
+`lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.23.lpk`。
 
 `lzc-cli` 的查找顺序是 `$LZC_CLI`、`lzc-cli`、`~/.local/share/lzctools/...`，
 最后才用 `npx @lazycatcloud/lzc-cli`。
@@ -35,7 +35,7 @@
 也可以让 `lzc-cli` 直接装到已配置的微服：
 
 ```bash
-lzc-cli lpk install lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.22.lpk
+lzc-cli lpk install lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.23.lpk
 ```
 
 （需要先 `lzc-cli box add-by-ssh <用户> <地址>` 并 `lzc-cli box switch` 选中它。）
@@ -61,10 +61,15 @@ lzc-cli lpk install lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.22.lpk
 
 ## 关键设计
 
-- **不构建镜像**：`lzc-manifest.yml` 的 service 不写 `image`，使用平台默认的
-  Alpine 运行时；`contentdir` 里的 `music-server` 直接作为 `entrypoint` 运行，
-  位置是 `/lzcapp/pkg/content/music-server`。这样构建只需要 Go 和 `lzc-cli`，
+- **不构建镜像**：`lzc-manifest.yml` 的 service 用官方运行时
+  `registry.lazycat.cloud/lzc/lzcapp:3.20.3`；`contentdir` 里的
+  `music-server` 直接作为 `entrypoint` 运行，位置是
+  `/lzcapp/pkg/content/music-server`。这样构建只需要 Go、gcc 和 `lzc-cli`，
   不需要 Docker，也不需要把镜像推到任何仓库。
+- **静态链接**：MyGo 的音频包会带进 purego，普通的 Go 构建会依赖 glibc 的
+  动态加载器，而运行时是 musl 的 Alpine。脚本用
+  `-linkmode external -extldflags "-static"` 链接成不依赖解释器的静态二进制，
+  并在打包前检查 `file` 的结果，链接不静态就直接失败。
 - **用 `services` + `routes`**：路由指向
   `music.cloud.lazycat.app.mygomusic.lzcapp:8090`；没有用 `application.image`，
   避免平台不执行镜像入口的问题。

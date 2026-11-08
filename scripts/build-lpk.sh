@@ -21,8 +21,16 @@ fi
 echo "building the server for linux/amd64"
 rm -rf lazycat/content
 mkdir -p lazycat/content/web
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 "$GO" build -trimpath -ldflags='-s -w' \
+# The MyGo audio packages pull in purego, whose dlopen shims make an
+# ordinary Go binary need the glibc loader; the runtime here is musl-based
+# Alpine. Link against static libc instead, with the pure-Go resolver.
+CGO_ENABLED=1 GOOS=linux GOARCH=amd64 "$GO" build -tags netgo,osusergo \
+	-trimpath -ldflags='-s -w -linkmode external -extldflags "-static"' \
 	-o lazycat/content/music-server ./cmd/server
+if ! file lazycat/content/music-server | grep -q 'statically linked'; then
+	echo "the server binary is not statically linked; it will not run on Alpine" >&2
+	exit 1
+fi
 
 cp web/index.html web/app.wasm web/app.wasm.gz web/wasm_exec.js lazycat/content/web/
 # LRCLib is reached over HTTPS; pack a CA bundle in case the runtime has none.
