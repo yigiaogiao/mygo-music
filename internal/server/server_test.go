@@ -182,3 +182,22 @@ func TestSetupPageBrowsesTheNetdisk(t *testing.T) {
 		}
 	}
 }
+
+func TestSetupPageOpensTheSingleNetdiskUser(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(dir, "RemoteFS")
+	if err := os.MkdirAll(filepath.Join(root, "shenhai", "音乐"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s := testServer(t)
+	s.cfg = Config{MusicDir: root, Version: "test"}
+
+	rec := httptest.NewRecorder()
+	s.setup(rec, httptest.NewRequest(http.MethodGet, "/setup", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("setup page: %d %s", rec.Code, rec.Body)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, "音乐") {
+		t.Fatalf("setup page did not open the user's home: %s", body)
+	}
+}

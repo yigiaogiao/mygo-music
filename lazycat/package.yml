@@ -1,5 +1,5 @@
 package: cloud.lazycat.app.mygomusic
-version: 0.1.24
+version: 0.1.25
 name: MyGo Music
 description: A music player for the folders on your netdisk, which finds lyrics as it plays.
 author: yigiaogiao

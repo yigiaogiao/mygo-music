@@ -32,8 +32,9 @@ type dirRow struct {
 }
 
 type folderRow struct {
-	Name string
-	Path string
+	Name  string
+	Path  string
+	Whole bool
 }
 
 type setupData struct {
@@ -70,6 +71,13 @@ func (s *Server) setupPage(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Query().Get("path")
 	if path == "" {
 		path = root
+		// The netdisk mount holds one directory per user, so with a single
+		// user the page opens on their home instead of a lone "shenhai".
+		if filepath.Base(root) == "RemoteFS" {
+			if rows := s.setupDirs(root); len(rows) == 1 && !rows[0].Symlink {
+				path = rows[0].Path
+			}
+		}
 	}
 	path = abs(path)
 	var problem string
@@ -99,7 +107,11 @@ func (s *Server) setupPage(w http.ResponseWriter, r *http.Request) {
 		d.Dirs = s.setupDirs(path)
 	}
 	for _, f := range s.local.Folders() {
-		d.Folders = append(d.Folders, folderRow{Name: shortPath(f, root), Path: f})
+		d.Folders = append(d.Folders, folderRow{
+			Name:  shortPath(f, root),
+			Path:  f,
+			Whole: filepath.Clean(f) == filepath.Clean(root),
+		})
 	}
 
 	s.langMu.Lock()
@@ -298,7 +310,7 @@ code{background:var(--card);border:1px solid var(--line);border-radius:6px;paddi
 <div class="card">
 {{range .Folders}}
   <div class="row">
-    <span class="name" title="{{.Path}}">{{.Name}}</span>
+    <span class="name" title="{{.Path}}">{{if .Whole}}{{t "The whole netdisk"}}{{else}}{{.Name}}{{end}}</span>
     <form method="post" action="/setup"><input type="hidden" name="action" value="remove"><input type="hidden" name="path" value="{{.Path}}"><button type="submit">{{t "Remove"}}</button></form>
   </div>
 {{else}}
