@@ -27,14 +27,14 @@ type Track struct {
 
 // A Result is what LRCLib has of a song.
 type Result struct {
-	ID           int64  `json:"id"`
-	TrackName    string `json:"trackName"`
-	ArtistName   string `json:"artistName"`
-	AlbumName    string `json:"albumName"`
-	Duration     int    `json:"duration"`
-	Instrumental bool   `json:"instrumental"`
-	PlainLyrics  string `json:"plainLyrics"`
-	SyncedLyrics string `json:"syncedLyrics"`
+	ID           int64   `json:"id"`
+	TrackName    string  `json:"trackName"`
+	ArtistName   string  `json:"artistName"`
+	AlbumName    string  `json:"albumName"`
+	Duration     float64 `json:"duration"` // seconds, which LRCLib writes with a decimal
+	Instrumental bool    `json:"instrumental"`
+	PlainLyrics  string  `json:"plainLyrics"`
+	SyncedLyrics string  `json:"syncedLyrics"`
 }
 
 // A Client asks LRCLib.
@@ -57,15 +57,20 @@ func New() *Client {
 // Lookup finds the timed lyrics of t. It answers "" and no error when LRCLib
 // has none.
 func (c *Client) Lookup(ctx context.Context, t Track) (string, error) {
-	if r, err := c.get(ctx, t); err == nil {
-		if r.SyncedLyrics != "" && !r.Instrumental {
-			return r.SyncedLyrics, nil
+	// /api/get wants the artist and the album as well as the title, and a
+	// track tagged with only a title (a WAV, say) would make it a 400. Search
+	// finds those.
+	if t.Artist != "" && t.Album != "" {
+		if r, err := c.get(ctx, t); err == nil {
+			if r.SyncedLyrics != "" && !r.Instrumental {
+				return r.SyncedLyrics, nil
+			}
+			if r.Instrumental {
+				return "", nil
+			}
+		} else if !errors.Is(err, errNotFound) {
+			return "", err
 		}
-		if r.Instrumental {
-			return "", nil
-		}
-	} else if !errors.Is(err, errNotFound) {
-		return "", err
 	}
 	rs, err := c.search(ctx, t)
 	if err != nil {
@@ -131,7 +136,9 @@ func (c *Client) do(ctx context.Context, path string, out any) error {
 	defer res.Body.Close()
 	switch res.StatusCode {
 	case http.StatusOK:
-	case http.StatusNotFound:
+	case http.StatusNotFound, http.StatusBadRequest:
+		// 400 says /api/get wanted more than it was given, which search can
+		// still answer.
 		return errNotFound
 	default:
 		return fmt.Errorf("lrclib: %s", res.Status)
@@ -176,7 +183,7 @@ func matchScore(r Result, t Track) int {
 		score++
 	}
 	if t.Duration > 0 && r.Duration > 0 {
-		d := t.Duration - time.Duration(r.Duration)*time.Second
+		d := t.Duration - time.Duration(r.Duration*float64(time.Second))
 		if d < 0 {
 			d = -d
 		}

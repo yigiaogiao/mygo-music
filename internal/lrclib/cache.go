@@ -135,11 +135,16 @@ func (c *Cache) write(key string, e entry) {
 	}
 }
 
+// cacheVersion changes when what a lookup asks, or how it picks its answer,
+// does: a song LRCLib had all along isn't kept without lyrics by an answer
+// an older version found.
+const cacheVersion = 2
+
 func cacheKey(t Track) string {
 	// Length may be a second or two off from LRCLib's, as the tags and the
 	// audio disagree: five-second buckets keep near lengths together.
 	length := int64(t.Duration.Round(5*time.Second) / time.Second)
-	key := norm(t.Title) + "\x00" + norm(t.Artist) + "\x00" + norm(t.Album) + "\x00" + strconv.FormatInt(length, 10)
+	key := strconv.Itoa(cacheVersion) + "\x00" + norm(t.Title) + "\x00" + norm(t.Artist) + "\x00" + norm(t.Album) + "\x00" + strconv.FormatInt(length, 10)
 	sum := sha256.Sum256([]byte(key))
 	return hex.EncodeToString(sum[:16])
 }

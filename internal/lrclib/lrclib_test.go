@@ -62,7 +62,7 @@ func TestLookupUsesGet(t *testing.T) {
 			t.Error("search used after get answered")
 			return nil
 		})
-	lrc, err := c.Lookup(context.Background(), Track{Title: "Song", Artist: "Band", Duration: 3 * time.Minute})
+	lrc, err := c.Lookup(context.Background(), Track{Title: "Song", Artist: "Band", Album: "Record", Duration: 3 * time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,6 +104,47 @@ func TestLookupNothing(t *testing.T) {
 	}
 }
 
+func TestLookupSearchesWhenOnlyTheTitleIsKnown(t *testing.T) {
+	// /api/get wants an artist and an album too, and answers 400 without
+	// them; a WAV has only its name, and search finds it.
+	c, calls := fakeLRCLib(t,
+		func(tr Track) (int, any) {
+			t.Error("get used without an artist and an album")
+			return http.StatusBadRequest, nil
+		},
+		func(tr Track) []Result {
+			if tr.Title != "七里香" {
+				t.Errorf("search asked for %q", tr.Title)
+			}
+			return []Result{{TrackName: "七里香", ArtistName: "Jay Chou", Duration: 297, SyncedLyrics: "[00:01.00]words"}}
+		})
+	lrc, err := c.Lookup(context.Background(), Track{Title: "七里香", Duration: 297 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lrc != "[00:01.00]words" {
+		t.Errorf("lyrics %q", lrc)
+	}
+	if n := atomic.LoadInt32(calls); n != 1 {
+		t.Errorf("asked %d times, want 1", n)
+	}
+}
+
+func TestLookupReadsADecimalDuration(t *testing.T) {
+	c, _ := fakeLRCLib(t,
+		func(tr Track) (int, any) { return http.StatusNotFound, nil },
+		func(tr Track) []Result {
+			return []Result{{TrackName: "Song", ArtistName: "Band", Duration: 180.0, SyncedLyrics: "[00:01.00]words"}}
+		})
+	lrc, err := c.Lookup(context.Background(), Track{Title: "Song", Artist: "Band", Album: "Record", Duration: 3 * time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lrc != "[00:01.00]words" {
+		t.Errorf("lyrics %q", lrc)
+	}
+}
+
 func TestPickSkipsInstrumentalAndUnsynced(t *testing.T) {
 	rs := []Result{
 		{TrackName: "Song", ArtistName: "Band", Duration: 180, Instrumental: true, SyncedLyrics: "[00:01.00]x"},
@@ -123,7 +164,7 @@ func TestCacheKeepsFoundLyrics(t *testing.T) {
 		func(tr Track) []Result { return nil })
 	cache := NewCache(t.TempDir())
 	cache.Now = func() time.Time { return now }
-	tr := Track{Title: "Song", Artist: "Band", Duration: 3 * time.Minute}
+	tr := Track{Title: "Song", Artist: "Band", Album: "Record", Duration: 3 * time.Minute}
 
 	for i := 0; i < 2; i++ {
 		lrc, err := cache.Lookup(context.Background(), c, tr)
@@ -154,7 +195,7 @@ func TestCacheKeepsNotFoundBriefly(t *testing.T) {
 		func(tr Track) []Result { return nil })
 	cache := NewCache(t.TempDir())
 	cache.Now = func() time.Time { return now }
-	tr := Track{Title: "Unknown", Artist: "Nobody", Duration: 2 * time.Minute}
+	tr := Track{Title: "Unknown", Artist: "Nobody", Album: "Record", Duration: 2 * time.Minute}
 
 	for i := 0; i < 2; i++ {
 		lrc, err := cache.Lookup(context.Background(), c, tr)
@@ -180,7 +221,7 @@ func TestCacheSurvivesRestart(t *testing.T) {
 			return http.StatusOK, Result{TrackName: "Song", ArtistName: "Band", Duration: 180, SyncedLyrics: "[00:01.00]words"}
 		},
 		func(tr Track) []Result { return nil })
-	tr := Track{Title: "Song", Artist: "Band", Duration: 3 * time.Minute}
+	tr := Track{Title: "Song", Artist: "Band", Album: "Record", Duration: 3 * time.Minute}
 	first := NewCache(dir)
 	if _, err := first.Lookup(context.Background(), c, tr); err != nil {
 		t.Fatal(err)

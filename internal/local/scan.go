@@ -403,6 +403,7 @@ func readTags(f *os.File, typ string, size int64) (t tags) {
 		}
 	}()
 	var src io.ReadSeeker = f
+	var tagAt io.ReaderAt = f // where an ID3v2 tag would start
 	// The library takes a FLAC behind an ID3 tag for an MP3.
 	start := int64(0)
 	switch typ {
@@ -416,13 +417,16 @@ func readTags(f *os.File, typ string, size int64) (t tags) {
 			return wavInfo(f, size)
 		}
 		src = id3
+		tagAt = id3
 	}
 	if _, err := src.Seek(start, io.SeekStart); err != nil {
 		return t
 	}
 	m, err := tag.ReadFrom(src)
 	if err != nil {
-		return t
+		// One bad frame loses the library the whole tag; read the frames
+		// one by one instead.
+		return readID3(tagAt)
 	}
 	t.title = cleanTag(m.Title())
 	t.artist = cleanTag(m.Artist())
@@ -436,6 +440,10 @@ func readTags(f *os.File, typ string, size int64) (t tags) {
 	t.lyrics = m.Lyrics()
 	if t.lyrics == "" {
 		t.lyrics, _ = raw["unsyncedlyrics"].(string)
+	}
+	if t.lyrics == "" {
+		// The library reads no SYLT, and no lyrics kept in TXXX or TEXT.
+		t.lyrics = readID3(tagAt).lyrics
 	}
 	t.lyrics = decodeLegacy(t.lyrics)
 	t.picture = m.Picture()
