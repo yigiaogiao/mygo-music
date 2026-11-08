@@ -309,16 +309,23 @@ func (a *app) volumeSlider(c *ui.Context, color, track ui.Color, width float32) 
 	})
 }
 
-// transport is the row of controls: shuffle, previous, play, next, repeat.
+// transport is the row of controls: the play mode, previous, play, next. One
+// button is the mode, as a player plays straight on, shuffles, repeats the
+// queue, or repeats one song.
 func (a *app) transport(c *ui.Context, color, dim, on ui.Color, size float32) {
 	pl := a.pl
 	ui.Row(c).Gap(size * 0.5).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
-		shuffle := dim
-		if pl.Shuffle() {
-			shuffle = on
+		mode, icon := dim, iconRepeatOff
+		switch {
+		case pl.Shuffle():
+			mode, icon = on, iconShuffle
+		case pl.Repeat() == player.RepeatAll:
+			mode, icon = on, iconRepeat
+		case pl.Repeat() == player.RepeatOne:
+			mode, icon = on, iconRepeat1
 		}
-		if iconButton(c.Key("shuffle"), iconShuffle, size*0.62, shuffle, T("Shuffle")).Clicked() {
-			pl.ToggleShuffle()
+		if iconButton(c.Key("mode"), icon, size*0.62, mode, T("Play Mode")).Clicked() {
+			a.nextPlayMode()
 		}
 		if iconButton(c.Key("prev"), iconPrev, size*0.85, color, T("Previous")).Clicked() {
 			pl.Prev()
@@ -329,17 +336,24 @@ func (a *app) transport(c *ui.Context, color, dim, on ui.Color, size float32) {
 		if iconButton(c.Key("next"), iconNext, size*0.85, color, T("Next")).Clicked() {
 			pl.Next()
 		}
-		repeat, ricon := dim, iconRepeat
-		switch pl.Repeat() {
-		case player.RepeatAll:
-			repeat = on
-		case player.RepeatOne:
-			repeat, ricon = on, iconRepeat1
-		}
-		if iconButton(c.Key("repeat"), ricon, size*0.62, repeat, T("Repeat")).Clicked() {
-			pl.CycleRepeat()
-		}
 	})
+}
+
+// nextPlayMode takes the player to the next mode: straight on, shuffle,
+// repeat the queue, repeat one song, and round again.
+func (a *app) nextPlayMode() {
+	pl := a.pl
+	switch {
+	case pl.Shuffle():
+		pl.ToggleShuffle()
+		pl.CycleRepeat() // off to all
+	case pl.Repeat() == player.RepeatOff:
+		pl.ToggleShuffle() // on
+	case pl.Repeat() == player.RepeatAll:
+		pl.CycleRepeat() // to one
+	default:
+		pl.CycleRepeat() // one to off
+	}
 }
 
 // mobilePlayerBarHeight is the height of the player bar in a narrow window,
