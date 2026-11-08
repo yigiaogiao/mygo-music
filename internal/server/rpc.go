@@ -312,6 +312,25 @@ func (s *Server) dispatch(ctx context.Context, r *http.Request, method string, r
 	case "Rescan":
 		s.local.Rescan()
 		return nil, nil
+	case "BrowseFolders":
+		var path string
+		if err := args(raw, &path); err != nil {
+			return nil, err
+		}
+		return s.browseFolders(path)
+	case "AddFolder":
+		var path string
+		if err := args(raw, &path); err != nil {
+			return nil, err
+		}
+		return nil, s.addFolder(path)
+	case "RemoveFolder":
+		var path string
+		if err := args(raw, &path); err != nil {
+			return nil, err
+		}
+		s.local.RemoveFolder(path)
+		return nil, nil
 	case "RemotePlay", "RemotePause", "RemoteResume", "RemoteSeek", "RemoteVolume", "RemoteState", "RemoteDevices", "RemoteUse":
 		return nil, music.ErrUnsupported
 	}

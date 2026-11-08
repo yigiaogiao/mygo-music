@@ -122,6 +122,7 @@ type app struct {
 	settingsOpen   bool
 	settingsScroll ui.ScrollState
 	settingsPick   ui.ScrollState
+	folders        folderPicker // the netdisk's folders, as the picker shows them
 
 	suggestions suggestState // what the search field's query may be after
 

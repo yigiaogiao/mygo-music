@@ -323,14 +323,13 @@ func (a *app) nowPlayingBody(c *ui.Context, tr *music.Track, art *artwork, accen
 		return
 	}
 	{
-		// The top strip drags the window; the chevron closes the view,
-		// showing only while the pointer is in the window, as the pane tabs do.
-		a.npRise(ui.Row(c).Height(topBar(c)).Justify(ui.Center).AlignItems(ui.Center).DragWindow(), 0).Children(func() {
-			reveal(ui.Box(c.Key("close-reveal")), pointerIn).Children(func() {
-				if iconButton(c.Key("close"), iconDown, 22, white.Alpha(0.7), T("Close")).Clicked() {
-					a.nowPlaying = false
-				}
-			})
+		// The top strip drags the window, and holds the way back to the page,
+		// always showing: a phone has no pointer to bring it out, and a label
+		// says what it does.
+		a.npRise(ui.Row(c).Height(topBar(c)).Padding(0, npSideX(w), 0, npSideX(w)).AlignItems(ui.Center).DragWindow(), 0).Children(func() {
+			if backButton(c.Key("back"), white.Alpha(0.78), ui.RGBA(255, 255, 255, 0.1), T("Back")).Clicked() {
+				a.nowPlaying = false
+			}
 		})
 		if a.npPane == paneStage {
 			// The stage takes the whole view: the lyrics are the show, the
@@ -458,8 +457,8 @@ func (a *app) nowPlayingCompact(c *ui.Context, tr *music.Track, art *artwork, ac
 		}
 	}
 	ui.Column(c).Absolute().Top(0).Left(0).Right(0).Bottom(0).Padding(topBar(c)+2, pad, 10, pad).Children(func() {
-		ui.Row(c).Height(28).Justify(ui.Center).Children(func() {
-			if iconButton(c.Key("close"), iconDown, 22, white.Alpha(0.7), T("Close")).Clicked() {
+		ui.Row(c).Height(28).AlignItems(ui.Center).Children(func() {
+			if backButton(c.Key("back"), white.Alpha(0.78), ui.RGBA(255, 255, 255, 0.1), T("Back")).Clicked() {
 				a.nowPlaying = false
 			}
 		})

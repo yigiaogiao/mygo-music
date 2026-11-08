@@ -41,6 +41,41 @@ type Status struct {
 	Version  string   `json:"version,omitempty"`
 }
 
+// A FolderPage is a folder of the netdisk, as the folder picker shows it:
+// what's under it, and the folders chosen.
+type FolderPage struct {
+	Root    string        `json:"root"`
+	Path    string        `json:"path"`
+	Parent  string        `json:"parent"`
+	AtRoot  bool          `json:"atRoot"`
+	Crumbs  []FolderCrumb `json:"crumbs"`
+	Dirs    []FolderDir   `json:"dirs"`
+	Folders []FolderPick  `json:"folders"`
+	Added   bool          `json:"added"`
+	Problem string        `json:"problem"`
+}
+
+// FolderCrumb is a step of the way back to the netdisk's root.
+type FolderCrumb struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+}
+
+// FolderDir is a folder under the one the picker is looking at.
+type FolderDir struct {
+	Name    string `json:"name"`
+	Path    string `json:"path"`
+	Added   bool   `json:"added"`
+	Symlink bool   `json:"symlink"`
+}
+
+// FolderPick is a folder chosen, which the library reads.
+type FolderPick struct {
+	Name  string `json:"name"`
+	Path  string `json:"path"`
+	Whole bool   `json:"whole"`
+}
+
 // A Source is a music.Source answered by a mygo-music server.
 type Source struct {
 	base string
@@ -73,9 +108,6 @@ func New(base string) *Source {
 // Close stops watching the server.
 func (s *Source) Close() { s.once.Do(s.cancel) }
 
-// SetupURL is the server's page for choosing folders.
-func (s *Source) SetupURL() string { return s.base + "/setup" }
-
 // Status is what the server said last, without waiting for it.
 func (s *Source) Status() Status {
 	s.mu.Lock()
@@ -87,6 +119,23 @@ func (s *Source) Status() Status {
 func (s *Source) Rescan() error {
 	var out struct{}
 	return s.call("Rescan", nil, &out)
+}
+
+// BrowseFolders asks what the netdisk holds at path, and what's chosen.
+func (s *Source) BrowseFolders(path string) (*FolderPage, error) {
+	var out FolderPage
+	err := s.call("BrowseFolders", []any{path}, &out)
+	return &out, err
+}
+
+// AddFolder asks the server to read a folder of the netdisk.
+func (s *Source) AddFolder(path string) error {
+	return s.call("AddFolder", []any{path}, nil)
+}
+
+// RemoveFolder asks the server to stop reading a folder.
+func (s *Source) RemoveFolder(path string) error {
+	return s.call("RemoveFolder", []any{path}, nil)
 }
 
 // OnChange sets what's called, on any goroutine, after what the server lists

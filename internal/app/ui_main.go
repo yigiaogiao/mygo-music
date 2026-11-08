@@ -105,6 +105,7 @@ func (a *app) view(c *ui.Context) {
 	a.signInDialog(c, a.pal, false)
 	a.playlistNameDialog(c)
 	a.deletePlaylistDialog(c)
+	a.folderPickerDialog(c)
 	if a.toast != "" {
 		c.Toast(a.toast)
 		a.toast = ""
@@ -438,14 +439,14 @@ func (a *app) pageTop(c *ui.Context) {
 			// Room for the drawer's button at the edge.
 			left = 8
 		}
-		ui.Row(c).Absolute().Top(0).Left(left).Height(topBar(c)).AlignItems(ui.Center).Children(func() {
+		ui.Row(c).Absolute().Top(0).Left(left).Height(topBar(c)).Gap(4).AlignItems(ui.Center).Children(func() {
 			if mobile {
 				if iconButton(c.Key("menu"), iconMenu, 19, a.pal.text, T("Menu")).Clicked() {
 					a.navOpen = !a.navOpen
 				}
 			}
 			if len(a.history) > 0 || len(a.forward) > 0 {
-				back := iconButton(c.Key("back"), iconBack, 18, a.pal.muted, T("Back")).Disabled(len(a.history) == 0)
+				back := backButton(c.Key("back"), a.pal.muted, a.pal.hover, T("Back")).Disabled(len(a.history) == 0)
 				if len(a.history) == 0 {
 					back.Opacity(0.35)
 				}

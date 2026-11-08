@@ -21,10 +21,3 @@ func platformSource() music.Source {
 
 // webBuild reports whether this is the browser app.
 func webBuild() bool { return true }
-
-// openFolderSetup takes the browser to the server's folder page in the same
-// window. window.open is blocked in the LazyCat desktop and mobile webviews,
-// so a popup would leave the button looking dead.
-func openFolderSetup(url string) {
-	js.Global().Get("location").Call("assign", url)
-}

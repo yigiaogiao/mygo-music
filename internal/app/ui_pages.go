@@ -191,14 +191,14 @@ func (a *app) emptyHome(c *ui.Context) {
 				ui.Text(c, T("Pick the folders on your LazyCat netdisk, and their songs will all be here.")).
 					FontSize(13.5).TextColor(p.muted).TextAlign(ui.Center).MaxWidth(420).LineHeight(1.45)
 				if pillButton(c.Key("choose-folders"), iconFolder, T("Choose Folders"), p.accent, p.onAccent).Margin(10, 0, 0, 0).Clicked() {
-					openFolderSetup(w.SetupURL())
+					a.openFolderPicker(w)
 				}
 			default:
 				ui.Text(c, T("No music found")).FontSize(22).FontWeight(700).LetterSpacing(-0.3)
 				ui.Text(c, T("There are no music files in the folders you chose. Try another.")).
 					FontSize(13.5).TextColor(p.muted).TextAlign(ui.Center).MaxWidth(420).LineHeight(1.45)
 				if pillButton(c.Key("choose-folders"), iconFolder, T("Choose Folders"), p.accent, p.onAccent).Margin(10, 0, 0, 0).Clicked() {
-					openFolderSetup(w.SetupURL())
+					a.openFolderPicker(w)
 				}
 			}
 		case lib.id == local.ID && a.local != nil && a.local.Scanning():

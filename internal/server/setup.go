@@ -70,12 +70,7 @@ func (s *Server) setupPage(w http.ResponseWriter, r *http.Request) {
 	root := s.cfg.MusicDir
 	path := r.URL.Query().Get("path")
 	if path == "" {
-		path = root
-		// The netdisk root can hold one directory per user, so with a single
-		// user the page opens on their home instead of a lone "shenhai".
-		if rows, err := s.setupDirs(root); err == nil && len(rows) == 1 && !rows[0].Symlink {
-			path = rows[0].Path
-		}
+		path = s.startPath(root)
 	}
 	path = abs(path)
 	var problem string
@@ -129,6 +124,15 @@ func (s *Server) setupPage(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
+}
+
+// startPath is where the netdisk opens: its root, or else the home of the
+// single user whose folder it holds, rather than a lone name.
+func (s *Server) startPath(root string) string {
+	if rows, err := s.setupDirs(root); err == nil && len(rows) == 1 && !rows[0].Symlink {
+		return rows[0].Path
+	}
+	return root
 }
 
 func (s *Server) setupDirs(path string) ([]dirRow, error) {

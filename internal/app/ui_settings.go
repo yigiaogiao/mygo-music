@@ -251,8 +251,11 @@ func (a *app) settingsSheet(c *ui.Context) {
 		pad = 14
 	}
 	ui.Box(c.Key("settings-sheet")).Absolute().Top(0).Left(0).Right(0).Bottom(0).Background(p.bg).Children(func() {
-		header := ui.Row(c.Key("header")).Absolute().Top(0).Left(0).Right(0).Height(top).Padding(0, 14, 0, 14).AlignItems(ui.Center).DragWindow()
+		header := ui.Row(c.Key("header")).Absolute().Top(0).Left(0).Right(0).Height(top).Padding(0, 14, 0, 14).Gap(8).AlignItems(ui.Center).DragWindow()
 		header.Children(func() {
+			if backButton(c.Key("back"), p.muted, p.hover, T("Back")).Clicked() {
+				a.settingsOpen = false
+			}
 			ui.Text(c, T("Settings")).FontSize(15).FontWeight(700).SingleLine().Shrink(1).MinWidth(0)
 			ui.Box(c).Grow(1)
 			if iconButton(c.Key("close"), iconX, 17, p.muted, T("Close")).Clicked() {
@@ -627,7 +630,7 @@ func (a *app) webSettings(c *ui.Context, lib *library, w *websource.Source, row 
 				}()
 			}
 			if ui.Button(c.Key("choose-folders"), T("Choose Folders")).Clicked() {
-				openFolderSetup(w.SetupURL())
+				a.openFolderPicker(w)
 			}
 		})
 	})
@@ -640,7 +643,7 @@ func (a *app) webSettings(c *ui.Context, lib *library, w *websource.Source, row 
 		})
 	}
 	block(T("About the Netdisk"), func() {
-		ui.Text(c, T("The player reads the folders you choose on the netdisk, without copying them. Add or remove folders on the server's page.")).
+		ui.Text(c, T("The player reads the folders you choose on the netdisk, without copying them.")).
 			FontSize(12).TextColor(p.muted).LineHeight(1.45)
 	})
 }
