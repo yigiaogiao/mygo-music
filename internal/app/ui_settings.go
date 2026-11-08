@@ -627,7 +627,7 @@ func (a *app) webSettings(c *ui.Context, lib *library, w *websource.Source, row 
 				}()
 			}
 			if ui.Button(c.Key("choose-folders"), T("Choose Folders")).Clicked() {
-				mygo.Shell.OpenExternal(w.SetupURL())
+				openFolderSetup(w.SetupURL())
 			}
 		})
 	})

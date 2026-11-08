@@ -22,7 +22,7 @@
 
 脚本会：编译 `linux/amd64` 的静态服务端、编译 WebAssembly 前端、把两者放进
 `lazycat/content/`，再调用 `lzc-cli project build`。产物在
-`lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.23.lpk`。
+`lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.24.lpk`。
 
 `lzc-cli` 的查找顺序是 `$LZC_CLI`、`lzc-cli`、`~/.local/share/lzctools/...`，
 最后才用 `npx @lazycatcloud/lzc-cli`。
@@ -35,7 +35,7 @@
 也可以让 `lzc-cli` 直接装到已配置的微服：
 
 ```bash
-lzc-cli lpk install lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.23.lpk
+lzc-cli lpk install lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.24.lpk
 ```
 
 （需要先 `lzc-cli box add-by-ssh <用户> <地址>` 并 `lzc-cli box switch` 选中它。）

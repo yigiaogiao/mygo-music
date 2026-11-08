@@ -267,6 +267,7 @@ form{display:inline;margin:0}
 .notice{padding:12px 16px;border-radius:12px;background:#20251f;color:#bfe8cd;border:1px solid #2d4234;margin:16px 0}
 .problem{padding:12px 16px;border-radius:12px;background:#2a1d22;color:#f2b8c6;border:1px solid #4a2b35;margin:16px 0}
 .empty{color:var(--muted);padding:18px 16px;text-align:center}
+code{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:2px 6px;font-size:12px;word-break:break-all}
 .footer{display:flex;gap:10px;flex-wrap:wrap;margin-top:28px}
 .footer .button{background:var(--card);border:1px solid var(--line)}
 @media (max-width:520px){
@@ -281,6 +282,7 @@ form{display:inline;margin:0}
 <main>
 <header><h1>MyGo Music</h1><span class="version">{{.Version}}</span></header>
 <p>{{t "Pick the folders on your LazyCat netdisk, and their songs will all be here."}}</p>
+<p>{{t "Netdisk folder"}}: <code>{{.Root}}</code></p>
 
 <div class="bar">
   <span class="pill">{{if .Scanning}}<i class="dot scanning"></i>{{t "Looking for music…"}}{{else}}<i class="dot"></i>{{tf "%d songs found" .Tracks}}{{end}}</span>
@@ -321,7 +323,7 @@ form{display:inline;margin:0}
     {{if .Added}}<span class="sub">{{t "Added"}}</span>{{else}}<form method="post" action="/setup"><input type="hidden" name="action" value="add"><input type="hidden" name="path" value="{{.Path}}"><button type="submit">{{t "Add"}}</button></form>{{end}}
   </div>
 {{else}}
-  <div class="empty">{{t "This folder has no subfolders."}}</div>
+  <div class="empty">{{if and .AtRoot (not .Problem)}}{{t "The netdisk looks empty. If it has folders, check that media access is on, then restart the app."}}{{else}}{{t "This folder has no subfolders."}}{{end}}</div>
 {{end}}
 </div>
 

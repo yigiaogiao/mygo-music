@@ -160,3 +160,25 @@ func TestMediaRejectsMethods(t *testing.T) {
 		t.Errorf("POST: code %d", rec.Code)
 	}
 }
+
+func TestSetupPageBrowsesTheNetdisk(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(dir, "netdisk")
+	if err := os.MkdirAll(filepath.Join(root, "Music", "Album"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s := testServer(t)
+	s.cfg = Config{MusicDir: root, Version: "test"}
+
+	rec := httptest.NewRecorder()
+	s.setup(rec, httptest.NewRequest(http.MethodGet, "/setup", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("setup page: %d %s", rec.Code, rec.Body)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{"Music", root, `name="action" value="add"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("setup page is missing %q", want)
+		}
+	}
+}

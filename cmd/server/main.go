@@ -17,7 +17,7 @@ import (
 	"mygo-music/internal/server"
 )
 
-var version = "0.1.23"
+var version = "0.1.24"
 
 func main() {
 	addr := flag.String("addr", env("ADDR", ":8090"), "address to listen on")
@@ -29,6 +29,18 @@ func main() {
 	showVersion := flag.Bool("v", false, "print the version and exit")
 	flag.Parse()
 	version = *v
+
+	// The netdisk is normally at /lzcapp/media/RemoteFS. Some runtimes mount
+	// it straight under /lzcapp/media, so browse that root when RemoteFS is
+	// missing rather than showing an empty page.
+	if *music == "/lzcapp/media/RemoteFS" {
+		if _, err := os.Stat(*music); err != nil {
+			if info, err := os.Stat("/lzcapp/media"); err == nil && info.IsDir() {
+				log.Printf("%s is missing; browsing /lzcapp/media instead", *music)
+				*music = "/lzcapp/media"
+			}
+		}
+	}
 
 	if *showVersion {
 		os.Stdout.WriteString(version + "\n")
