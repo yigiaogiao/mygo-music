@@ -22,7 +22,7 @@
 
 脚本会：编译 `linux/amd64` 的静态服务端、编译 WebAssembly 前端、把两者放进
 `lazycat/content/`，再调用 `lzc-cli project build`。产物在
-`lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.25.lpk`。
+`lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.27.lpk`。
 
 `lzc-cli` 的查找顺序是 `$LZC_CLI`、`lzc-cli`、`~/.local/share/lzctools/...`，
 最后才用 `npx @lazycatcloud/lzc-cli`。
@@ -35,7 +35,7 @@
 也可以让 `lzc-cli` 直接装到已配置的微服：
 
 ```bash
-lzc-cli lpk install lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.25.lpk
+lzc-cli lpk install lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.27.lpk
 ```
 
 （需要先 `lzc-cli box add-by-ssh <用户> <地址>` 并 `lzc-cli box switch` 选中它。）
@@ -73,8 +73,13 @@ lzc-cli lpk install lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.25.lpk
 - **用 `services` + `routes`**：路由指向
   `music.cloud.lazycat.app.mygomusic.lzcapp:8090`；没有用 `application.image`，
   避免平台不执行镜像入口的问题。
-- **网盘**：`ext_config.enable_media_access: true` 把媒体目录挂到
-  `/lzcapp/media`，音乐在 `/lzcapp/media/RemoteFS` 下面。
+- **网盘**：懒猫网盘是用户的文稿目录，用
+  `ext_config.enable_document_access: true` 挂到
+  `/lzcapp/run/mnt/home`（新版系统同时有 `/lzcapp/document`），并在
+  `package.yml` 声明 `document.read`。服务端启动时依次探测
+  `/lzcapp/run/mnt/home`、`/lzcapp/document`、`/lzcapp/media/RemoteFS`，
+  选第一个可读的目录。`enable_media_access`、`media.read` 保留作兜底，
+  `net.internet` 用于 LRCLib。权限没给时页面会明确提示读不到网盘。
 - **持久化**：`/lzcapp/var` 是平台保证保留的目录，映射到容器的 `/data`。
 - **HTTPS 证书**：包里带了 `ca-certificates.crt`，用 `SSL_CERT_FILE` 指过去，
   默认运行时没有根证书也能访问 LRCLib。
@@ -95,8 +100,9 @@ go run ./cmd/server -music /path/to/music -data ./data
 ## 排障
 
 - **安装后打不开**：看应用日志。多半是 `entrypoint` 路径或 `MUSIC_DIR` 不对。
-- **看不到网盘文件夹**：确认 manifest 里有 `enable_media_access: true`，
-  且音乐在 `/lzcapp/media/RemoteFS` 下；第一次安装后重启一次应用。
+- **看不到网盘文件夹**：确认包声明了 `document.read`、manifest 里有
+  `enable_document_access: true`，并在客户端里允许应用读取文稿/网盘；
+  装完重启一次应用。页面显示「网盘目录」就是服务端实际读的路径。
 - **没有在线歌词**：微服访问不了 `lrclib.net`，或者包里的 CA 证书没生效；
   检查 `SSL_CERT_FILE` 和 `/lzcapp/pkg/content/ca-certificates.crt`。
 - **升级**：改 `package.yml` 的 `version` 后重新构建、重新安装；

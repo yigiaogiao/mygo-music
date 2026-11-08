@@ -19,7 +19,6 @@ services:
     environment:
       - ADDR=:8090
       - DATA_DIR=/data
-      - MUSIC_DIR=/lzcapp/media/RemoteFS
       - WEB_DIR=/lzcapp/pkg/content/web
       - ONLINE_LYRICS=true
       # The default runtime may have no CA bundle of its own; one is packed
@@ -32,6 +31,8 @@ services:
       start_period: 30s
       retries: 3
 
-# Mounts the LazyCat netdisk under /lzcapp/media, with RemoteFS inside it.
+# The netdisk is the user's document root, at /lzcapp/run/mnt/home. Media
+# access stays on so /lzcapp/media/RemoteFS works as a fallback.
 ext_config:
+  enable_document_access: true
   enable_media_access: true

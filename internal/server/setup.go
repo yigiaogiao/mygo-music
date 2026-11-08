@@ -71,12 +71,10 @@ func (s *Server) setupPage(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Query().Get("path")
 	if path == "" {
 		path = root
-		// The netdisk mount holds one directory per user, so with a single
+		// The netdisk root can hold one directory per user, so with a single
 		// user the page opens on their home instead of a lone "shenhai".
-		if filepath.Base(root) == "RemoteFS" {
-			if rows := s.setupDirs(root); len(rows) == 1 && !rows[0].Symlink {
-				path = rows[0].Path
-			}
+		if rows, err := s.setupDirs(root); err == nil && len(rows) == 1 && !rows[0].Symlink {
+			path = rows[0].Path
 		}
 	}
 	path = abs(path)
@@ -104,8 +102,16 @@ func (s *Server) setupPage(w http.ResponseWriter, r *http.Request) {
 	d.Crumbs = crumbs(root, path)
 	d.Added = containsPath(s.local.Folders(), path)
 	if problem == "" {
-		d.Dirs = s.setupDirs(path)
+		dirs, err := s.setupDirs(path)
+		if err != nil {
+			// The mount is there but its contents are not readable: usually
+			// the package did not declare media.read.
+			problem = "This folder could not be read. Check that the app may read the netdisk."
+		} else {
+			d.Dirs = dirs
+		}
 	}
+	d.Problem = problem
 	for _, f := range s.local.Folders() {
 		d.Folders = append(d.Folders, folderRow{
 			Name:  shortPath(f, root),
@@ -125,10 +131,10 @@ func (s *Server) setupPage(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) setupDirs(path string) []dirRow {
+func (s *Server) setupDirs(path string) ([]dirRow, error) {
 	entries, err := os.ReadDir(path)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	var rows []dirRow
 	added := s.local.Folders()
@@ -153,7 +159,7 @@ func (s *Server) setupDirs(path string) []dirRow {
 	sort.Slice(rows, func(i, j int) bool {
 		return strings.ToLower(rows[i].Name) < strings.ToLower(rows[j].Name)
 	})
-	return rows
+	return rows, nil
 }
 
 func (s *Server) setupAction(w http.ResponseWriter, r *http.Request) {

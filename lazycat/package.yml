@@ -1,8 +1,16 @@
 package: cloud.lazycat.app.mygomusic
-version: 0.1.25
+version: 0.1.27
 name: MyGo Music
 description: A music player for the folders on your netdisk, which finds lyrics as it plays.
 author: yigiaogiao
+# The netdisk is the user's document root (/lzcapp/run/mnt/home), granted by
+# document.read; media.read covers the /lzcapp/media fallback. LRCLib needs
+# the internet. The platform asks the user to approve these.
+permissions:
+  required:
+    - document.read
+    - media.read
+    - net.internet
 license: AGPL-3.0-only
 homepage: https://github.com/yigiaogiao/mygo-music
 locales:
