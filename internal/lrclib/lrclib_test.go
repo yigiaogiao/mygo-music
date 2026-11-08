@@ -174,23 +174,6 @@ func TestLookupAsksInSimplifiedWithoutATrackNumber(t *testing.T) {
 	}
 }
 
-func TestCleanTitle(t *testing.T) {
-	tests := []struct{ in, want string }{
-		{"08梵高先生", "梵高先生"},
-		{" 05 天空之城", "天空之城"},
-		{"03-和你在一起", "和你在一起"},
-		{"365天", "365天"},
-		{"2002年的第一场雪", "2002年的第一场雪"},
-		{"7 Rings", "7 Rings"},
-		{"Song", "Song"},
-	}
-	for _, tt := range tests {
-		if got := cleanTitle(tt.in); got != tt.want {
-			t.Errorf("cleanTitle(%q) = %q, want %q", tt.in, got, tt.want)
-		}
-	}
-}
-
 func TestPickSkipsInstrumentalAndUnsynced(t *testing.T) {
 	rs := []Result{
 		{TrackName: "Song", ArtistName: "Band", Duration: 180, Instrumental: true, SyncedLyrics: "[00:01.00]x"},

@@ -18,6 +18,8 @@ import (
 	"mygo-music/internal/i18n"
 	"mygo-music/internal/local"
 	"mygo-music/internal/lrclib"
+	"mygo-music/internal/netease"
+	"mygo-music/internal/qqmusic"
 )
 
 // Config is what the server needs to start.
@@ -31,7 +33,8 @@ type Config struct {
 	WebDir string
 	// Version is shown in the setup page and the status.
 	Version string
-	// OnlineLyrics looks up songs without timed lyrics at LRCLib.
+	// OnlineLyrics looks up songs without timed lyrics at LRCLib, NetEase
+	// and QQ Music.
 	OnlineLyrics bool
 }
 
@@ -41,6 +44,8 @@ type Server struct {
 	local   *local.Source
 	lyrics  *lrclib.Cache
 	lrclib  *lrclib.Client
+	netease *netease.Client
+	qqmusic *qqmusic.Client
 	library string // where local keeps its own files
 
 	secret []byte
@@ -83,6 +88,8 @@ func New(cfg Config) (*Server, error) {
 	s.local = local.New(s.library)
 	s.lyrics = lrclib.NewCache(filepath.Join(cfg.DataDir, "lyrics"))
 	s.lrclib = lrclib.New()
+	s.netease = netease.New()
+	s.qqmusic = qqmusic.New()
 	s.mux = http.NewServeMux()
 	s.routes()
 	if len(s.local.Folders()) > 0 {

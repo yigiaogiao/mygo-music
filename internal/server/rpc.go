@@ -350,8 +350,8 @@ func args(raw []json.RawMessage, dst ...any) error {
 	return nil
 }
 
-// lyricsFor answers what the file has, or else what LRCLib has, if online
-// lyrics are on and the file has no timed words.
+// lyricsFor answers what the file has, or else what an online service has,
+// if online lyrics are on and the file has no timed words.
 func (s *Server) lyricsFor(ctx context.Context, id string) (*music.Lyrics, error) {
 	l, err := s.local.Lyrics(id)
 	if err != nil {
@@ -370,7 +370,7 @@ func (s *Server) lyricsFor(ctx context.Context, id string) (*music.Lyrics, error
 	if !ok {
 		return simplifyLyrics(l), nil
 	}
-	lrc, err := s.lyrics.Lookup(ctx, s.lrclib, lrclib.Track{
+	lrc, err := s.lyrics.Lookup(ctx, finderFunc(s.findLyrics), lrclib.Track{
 		Title:    t.Name,
 		Artist:   t.ArtistNames(),
 		Album:    t.Album.Name,
@@ -384,6 +384,33 @@ func (s *Server) lyricsFor(ctx context.Context, id string) (*music.Lyrics, error
 		return simplifyLyrics(l), nil
 	}
 	return simplifyLyrics(&music.Lyrics{LRC: lrc}), nil
+}
+
+// finderFunc lets a function stand as a lrclib.Finder.
+type finderFunc func(context.Context, lrclib.Track) (string, error)
+
+func (f finderFunc) Lookup(ctx context.Context, t lrclib.Track) (string, error) {
+	return f(ctx, t)
+}
+
+// findLyrics asks each service in turn for timed words, LRCLib first, and
+// answers with the first that has them. A service that can't be reached is
+// passed over; an error is reported only when none answered.
+func (s *Server) findLyrics(ctx context.Context, t lrclib.Track) (string, error) {
+	var firstErr error
+	for _, finder := range []lrclib.Finder{s.lrclib, s.netease, s.qqmusic} {
+		lrc, err := finder.Lookup(ctx, t)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		if lrc != "" {
+			return lrc, nil
+		}
+	}
+	return "", firstErr
 }
 
 // simplifyLyrics writes the words in the simplified characters the app

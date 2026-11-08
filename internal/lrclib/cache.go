@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -25,8 +26,13 @@ type entry struct {
 	At    time.Time `json:"at"`
 }
 
-// A Cache keeps what was found in files in Dir, and asks LRCLib once for
-// songs asked for at the same time.
+// A Finder finds the timed lyrics of a song, as Client does at LRCLib.
+type Finder interface {
+	Lookup(context.Context, Track) (string, error)
+}
+
+// A Cache keeps what was found in files in Dir, and asks once for songs
+// asked for at the same time.
 type Cache struct {
 	Dir string
 	// Now is the time, which tests replace.
@@ -42,9 +48,9 @@ func NewCache(dir string) *Cache {
 }
 
 // Lookup answers the timed lyrics of t, from the cache if they are there and
-// still good, or else from LRCLib, whose answer it keeps. It answers "" and
+// still good, or else from finder, whose answer it keeps. It answers "" and
 // no error when there are none.
-func (c *Cache) Lookup(ctx context.Context, client *Client, t Track) (string, error) {
+func (c *Cache) Lookup(ctx context.Context, finder Finder, t Track) (string, error) {
 	key := cacheKey(t)
 	old, had := c.read(key)
 	if had && !c.stale(old) {
@@ -68,7 +74,7 @@ func (c *Cache) Lookup(ctx context.Context, client *Client, t Track) (string, er
 	c.flying[key] = ch
 	c.mu.Unlock()
 
-	lrc, err := client.Lookup(ctx, t)
+	lrc, err := finder.Lookup(ctx, t)
 	if err == nil {
 		c.write(key, entry{LRC: lrc, Found: lrc != "", At: c.now()})
 	}
@@ -79,8 +85,8 @@ func (c *Cache) Lookup(ctx context.Context, client *Client, t Track) (string, er
 	c.mu.Unlock()
 
 	if err != nil {
-		// What was found before is better than nothing while LRCLib can't be
-		// reached.
+		// What was found before is better than nothing while the service
+		// can't be reached.
 		if had {
 			return old.LRC, nil
 		}
@@ -135,16 +141,18 @@ func (c *Cache) write(key string, e entry) {
 	}
 }
 
-// cacheVersion changes when what a lookup asks, or how it picks its answer,
-// does: a song LRCLib had all along isn't kept without lyrics by an answer
-// an older version found.
-const cacheVersion = 3
+// cacheVersion changes when what a lookup asks, how it picks its answer, or
+// where it asks does: a song another service had all along isn't kept
+// without lyrics by an answer an older version found.
+const cacheVersion = 4
 
 func cacheKey(t Track) string {
 	// Length may be a second or two off from LRCLib's, as the tags and the
 	// audio disagree: five-second buckets keep near lengths together.
 	length := int64(t.Duration.Round(5*time.Second) / time.Second)
-	key := strconv.Itoa(cacheVersion) + "\x00" + norm(t.Title) + "\x00" + norm(t.Artist) + "\x00" + norm(t.Album) + "\x00" + strconv.FormatInt(length, 10)
+	key := strconv.Itoa(cacheVersion) + "\x00" + cacheNorm(t.Title) + "\x00" + cacheNorm(t.Artist) + "\x00" + cacheNorm(t.Album) + "\x00" + strconv.FormatInt(length, 10)
 	sum := sha256.Sum256([]byte(key))
 	return hex.EncodeToString(sum[:16])
 }
+
+func cacheNorm(s string) string { return strings.Join(strings.Fields(strings.ToLower(s)), " ") }
