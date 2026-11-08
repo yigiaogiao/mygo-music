@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strings"
 
+	"mygo-music/internal/hanzi"
 	"mygo-music/internal/i18n"
 	"mygo-music/internal/local"
 	"mygo-music/internal/lrclib"
@@ -360,14 +361,14 @@ func (s *Server) lyricsFor(ctx context.Context, id string) (*music.Lyrics, error
 		l = &music.Lyrics{}
 	}
 	if len(l.Lines) > 0 || len(lyrics.Build(l.LRC, l.Translation)) > 0 {
-		return l, nil
+		return simplifyLyrics(l), nil
 	}
 	if !s.cfg.OnlineLyrics {
-		return l, nil
+		return simplifyLyrics(l), nil
 	}
 	t, ok := s.local.Track(id)
 	if !ok {
-		return l, nil
+		return simplifyLyrics(l), nil
 	}
 	lrc, err := s.lyrics.Lookup(ctx, s.lrclib, lrclib.Track{
 		Title:    t.Name,
@@ -377,12 +378,32 @@ func (s *Server) lyricsFor(ctx context.Context, id string) (*music.Lyrics, error
 	})
 	if err != nil {
 		log.Printf("server: lyrics of %q: %v", t.Name, err)
-		return l, nil
+		return simplifyLyrics(l), nil
 	}
 	if lrc == "" {
-		return l, nil
+		return simplifyLyrics(l), nil
 	}
-	return &music.Lyrics{LRC: lrc}, nil
+	return simplifyLyrics(&music.Lyrics{LRC: lrc}), nil
+}
+
+// simplifyLyrics writes the words in the simplified characters the app
+// speaks, in Chinese: files keep them in traditional ones, as LRCLib often
+// does.
+func simplifyLyrics(l *music.Lyrics) *music.Lyrics {
+	if l == nil || i18n.Language() != i18n.Chinese {
+		return l
+	}
+	l.LRC = hanzi.ToSimplified(l.LRC)
+	l.Translation = hanzi.ToSimplified(l.Translation)
+	for i := range l.Lines {
+		line := &l.Lines[i]
+		line.Text = hanzi.ToSimplified(line.Text)
+		line.Translation = hanzi.ToSimplified(line.Translation)
+		for j := range line.Words {
+			line.Words[j].Text = hanzi.ToSimplified(line.Words[j].Text)
+		}
+	}
+	return l
 }
 
 // stream answers the file through a URL the browser can play, with a token

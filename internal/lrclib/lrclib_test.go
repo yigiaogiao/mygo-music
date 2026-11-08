@@ -145,6 +145,52 @@ func TestLookupReadsADecimalDuration(t *testing.T) {
 	}
 }
 
+func TestLookupAsksInSimplifiedWithoutATrackNumber(t *testing.T) {
+	c, _ := fakeLRCLib(t,
+		func(tr Track) (int, any) { return http.StatusNotFound, nil },
+		func(tr Track) []Result {
+			if tr.Title != "梵高先生" {
+				t.Errorf("search asked for title %q", tr.Title)
+			}
+			if tr.Artist != "李志" {
+				t.Errorf("search asked for artist %q", tr.Artist)
+			}
+			if tr.Album != "" {
+				t.Errorf("search asked by album %q, which would narrow it too much", tr.Album)
+			}
+			return []Result{{
+				TrackName: "梵高先生", ArtistName: "李志", AlbumName: "梵高先生2005",
+				Duration: 250, SyncedLyrics: "[00:01.00]words",
+			}}
+		})
+	lrc, err := c.Lookup(context.Background(), Track{
+		Title: "08梵高先生", Artist: "李誌", Album: "梵高先生2005", Duration: 250 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lrc != "[00:01.00]words" {
+		t.Errorf("lyrics %q", lrc)
+	}
+}
+
+func TestCleanTitle(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"08梵高先生", "梵高先生"},
+		{" 05 天空之城", "天空之城"},
+		{"03-和你在一起", "和你在一起"},
+		{"365天", "365天"},
+		{"2002年的第一场雪", "2002年的第一场雪"},
+		{"7 Rings", "7 Rings"},
+		{"Song", "Song"},
+	}
+	for _, tt := range tests {
+		if got := cleanTitle(tt.in); got != tt.want {
+			t.Errorf("cleanTitle(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
 func TestPickSkipsInstrumentalAndUnsynced(t *testing.T) {
 	rs := []Result{
 		{TrackName: "Song", ArtistName: "Band", Duration: 180, Instrumental: true, SyncedLyrics: "[00:01.00]x"},

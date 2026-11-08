@@ -138,7 +138,7 @@ func (c *Cache) write(key string, e entry) {
 // cacheVersion changes when what a lookup asks, or how it picks its answer,
 // does: a song LRCLib had all along isn't kept without lyrics by an answer
 // an older version found.
-const cacheVersion = 2
+const cacheVersion = 3
 
 func cacheKey(t Track) string {
 	// Length may be a second or two off from LRCLib's, as the tags and the
