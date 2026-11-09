@@ -31,3 +31,18 @@ func TestNoPlaybackPage(t *testing.T) {
 		t.Fatal("an Even Out Loudness row")
 	}
 }
+
+// The settings shown over the page go back the way they came: no cross
+// beside the back button, which did the same.
+func TestSettingsSheetHasOnlyBack(t *testing.T) {
+	a := newTestApp()
+	a.settingsOpen = true
+	tt := ui.NewTester(a.settingsSheet, 760, 1000)
+	tt.Frame()
+	if _, ok := tt.Find("Back"); !ok {
+		t.Fatal("no way back out of the settings")
+	}
+	if _, ok := tt.Find("Close"); ok {
+		t.Fatal("a Close button beside the back button")
+	}
+}

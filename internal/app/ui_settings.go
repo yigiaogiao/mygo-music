@@ -258,9 +258,6 @@ func (a *app) settingsSheet(c *ui.Context) {
 			}
 			ui.Text(c, T("Settings")).FontSize(15).FontWeight(700).SingleLine().Shrink(1).MinWidth(0)
 			ui.Box(c).Grow(1)
-			if iconButton(c.Key("close"), iconX, 17, p.muted, T("Close")).Clicked() {
-				a.settingsOpen = false
-			}
 		})
 		ui.Column(c).Absolute().Top(top).Left(0).Right(0).Bottom(0).Children(func() {
 			if mobile {

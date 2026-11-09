@@ -100,9 +100,6 @@ func (a *app) folderPickerDialog(c *ui.Context) {
 		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, T("Choose Folders")).FontSize(17).FontWeight(700).SingleLine().Shrink(1).MinWidth(0)
 			ui.Box(c).Grow(1)
-			if iconButton(c.Key("close"), iconX, 16, p.muted, T("Close")).Clicked() {
-				f.open = false
-			}
 		})
 		if page := f.page; page != nil {
 			a.folderCrumbs(c, p, page)
