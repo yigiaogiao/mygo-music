@@ -204,6 +204,7 @@ var zhCN = map[string]string{
 	"Mute":                                                                    "静音",
 	"My Page":                                                                 "我的主页",
 	"My Playlists":                                                            "我的歌单",
+	"Local Music":                                                             "本地音乐",
 	"New Playlist":                                                            "新建歌单",
 	"New Playlist…":                                                           "新建歌单…",
 	"Next":                                                                    "下一首",

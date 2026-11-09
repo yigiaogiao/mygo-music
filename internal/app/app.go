@@ -108,7 +108,7 @@ type app struct {
 	navScroll  ui.ScrollState
 	scrolled   route // the page trackList and pageScroll are of
 
-	mineCollapsed, savedCollapsed bool
+	mineCollapsed, savedCollapsed, foldersCollapsed bool
 
 	query     string
 	searchBox ui.Handle
@@ -379,6 +379,11 @@ func Run() error {
 			a.syncCaptions()
 		}
 		a.volume = a.settings.Volume
+		// In a browser the settings have no file to come back from: the
+		// volume the listener left there is kept in its storage.
+		if v, ok := savedVolume(); ok {
+			a.volume = v
+		}
 		a.pl.SetVolume(a.volume)
 		a.win = mygo.NewWindow(mygo.WindowOptions{
 			Title:         mygo.App.Name(),

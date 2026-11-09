@@ -53,16 +53,7 @@ func (c *Client) Lookup(ctx context.Context, t songmatch.Track) (string, error) 
 	}
 	var fits []found
 	for _, s := range songs {
-		artist := make([]string, len(s.Artists))
-		for i, a := range s.Artists {
-			artist[i] = a.Name
-		}
-		fit := songmatch.Score(songmatch.Track{
-			Title:    s.Name,
-			Artist:   strings.Join(artist, "/"),
-			Album:    s.Album.Name,
-			Duration: time.Duration(s.Duration) * time.Millisecond,
-		}, t)
+		fit := c.fit(s, t)
 		if fit >= 2 {
 			fits = append(fits, found{id: s.ID, fit: fit})
 		}
@@ -82,17 +73,33 @@ func (c *Client) Lookup(ctx context.Context, t songmatch.Track) (string, error) 
 	return "", nil
 }
 
+type credit struct {
+	Name string `json:"name"`
+}
+
+type albumInfo struct {
+	Name   string `json:"name"`
+	PicURL string `json:"picUrl"`
+}
+
 type song struct {
-	ID       int64                   `json:"id"`
-	Name     string                  `json:"name"`
-	Duration int64                   `json:"duration"` // milliseconds
-	Artists  []struct{ Name string } `json:"artists"`
-	Album    struct{ Name string }   `json:"album"`
+	ID       int64     `json:"id"`
+	Name     string    `json:"name"`
+	Duration int64     `json:"duration"` // milliseconds
+	Artists  []credit  `json:"artists"`
+	Album    albumInfo `json:"album"`
 }
 
 func (c *Client) search(ctx context.Context, t songmatch.Track) ([]song, error) {
 	q := url.Values{}
-	query := strings.TrimSpace(t.Title + " " + t.Artist)
+	query := t.Title
+	if query == "" {
+		// An album's cover is found by the album's name.
+		query = t.Album
+	}
+	if t.Artist != "" {
+		query = strings.TrimSpace(query + " " + t.Artist)
+	}
 	q.Set("s", query)
 	q.Set("type", "1")
 	q.Set("limit", "20")
@@ -110,6 +117,48 @@ func (c *Client) search(ctx context.Context, t songmatch.Track) ([]song, error) 
 
 // timed is a line of LRC, which plain words lack.
 var timed = regexp.MustCompile(`\[\d{1,3}:\d{2}`)
+
+// Cover finds the album art of t. It answers "" and no error when NetEase
+// has none.
+func (c *Client) Cover(ctx context.Context, t songmatch.Track) (string, error) {
+	t = songmatch.Normalize(t)
+	songs, err := c.search(ctx, t)
+	if err != nil {
+		return "", err
+	}
+	art, fit := "", 0
+	for _, s := range songs {
+		if s.Album.PicURL == "" {
+			continue
+		}
+		// An album's art is the art of the album asked for, not of
+		// another by the same artist.
+		if t.Title == "" && !strings.EqualFold(strings.TrimSpace(s.Album.Name), t.Album) {
+			continue
+		}
+		if n := c.fit(s, t); n > fit {
+			art, fit = s.Album.PicURL, n
+		}
+	}
+	if fit < 2 {
+		return "", nil
+	}
+	return art, nil
+}
+
+// fit scores how well s is the song t: its title, artist, album and length.
+func (c *Client) fit(s song, t songmatch.Track) int {
+	artist := make([]string, len(s.Artists))
+	for i, a := range s.Artists {
+		artist[i] = a.Name
+	}
+	return songmatch.Score(songmatch.Track{
+		Title:    s.Name,
+		Artist:   strings.Join(artist, "/"),
+		Album:    s.Album.Name,
+		Duration: time.Duration(s.Duration) * time.Millisecond,
+	}, t)
+}
 
 func (c *Client) lyric(ctx context.Context, id int64) (string, error) {
 	q := url.Values{}

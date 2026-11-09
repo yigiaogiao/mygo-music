@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"mygo-music/internal/local"
 )
@@ -22,6 +23,13 @@ func testServer(t *testing.T) *Server {
 	if err := os.MkdirAll(s.library, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// A scan started by a test may still be writing into the directory as
+	// it's cleaned up.
+	t.Cleanup(func() {
+		for s.local.Scanning() {
+			time.Sleep(time.Millisecond)
+		}
+	})
 	return s
 }
 

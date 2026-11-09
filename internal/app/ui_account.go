@@ -474,6 +474,60 @@ func (a *app) myPlaylists(c *ui.Context, title string, lists []music.Playlist, m
 	}
 }
 
+// localMusic lists the source's folders under a header, each opening as a
+// playlist of the songs it holds: local files have no playlists of their own
+// for them, and the sidebar says where the music is.
+func (a *app) localMusic(c *ui.Context) {
+	lib := a.library
+	if !lib.can("localFolders") || len(lib.folders) == 0 {
+		return
+	}
+	p := a.pal
+	ui.Row(c.Key("folders")).AlignItems(ui.Center).Margin(18, 4, 6, 6).Children(func() {
+		b := ui.ButtonBase(c.Key("toggle")).Grow(1).Height(26).PaddingX(4).Gap(6).Radius(6).
+			AlignItems(ui.Center).Justify(ui.Start).Role(ui.RoleDisclosure).Label(T("Local Music"))
+		if b.Clicked() {
+			a.foldersCollapsed = !a.foldersCollapsed
+		}
+		b.Expanded(!a.foldersCollapsed)
+		if b.Hovered() {
+			b.Background(p.hover)
+		}
+		b.Children(func() {
+			ui.Text(c, T("Local Music")).FontSize(11.5).FontWeight(600).TextColor(p.faint).Grow(1)
+			arrow := iconDown
+			if a.foldersCollapsed {
+				arrow = iconForward
+			}
+			ui.Icon(c, arrow).Size(12, 12).TextColor(p.faint)
+		})
+	})
+	if a.foldersCollapsed {
+		return
+	}
+	for i := range lib.folders {
+		pl := &lib.folders[i]
+		selected := a.route.page == pagePlaylist && a.route.id == pl.ID && !a.nowPlaying
+		b := ui.ButtonBase(c.Key(pl.ID)).Height(34).PaddingX(8).Gap(10).Radius(8).AlignItems(ui.Center).Justify(ui.Start).FocusRing(false).Label(pl.Name)
+		switch {
+		case selected:
+			b.Background(p.press)
+		case b.Hovered():
+			b.Background(p.hover)
+		}
+		b.Children(func() {
+			box := ui.Box(c).Size(22, 22).Radius(5).Center().Background(p.hover)
+			box.Children(func() {
+				ui.Icon(c, iconFolder).Size(13, 13).TextColor(p.muted)
+			})
+			ui.Text(c, pl.Name).FontSize(13).SingleLine().Shrink(1).MinWidth(0)
+		})
+		if b.Clicked() {
+			a.open(route{page: pagePlaylist, id: pl.ID})
+		}
+	}
+}
+
 // playlistMenu has what can be done with a playlist of the listener's, as far
 // as the source can.
 func (a *app) playlistMenu(m *ui.Menu, pl *music.Playlist) {

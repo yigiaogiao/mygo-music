@@ -136,6 +136,25 @@ func (a *app) loadMine(lib *library) {
 	}()
 }
 
+// loadFolders asks a source whose folders are lists for them, as local files
+// are: Local Music in the sidebar.
+func (a *app) loadFolders(lib *library) {
+	src, ok := lib.src.(music.FolderSource)
+	if !ok || !lib.can("localFolders") {
+		return
+	}
+	lib.foldersAt = time.Now()
+	go func() {
+		lists, err := src.FolderPlaylists()
+		a.post(func() {
+			if err != nil {
+				return
+			}
+			lib.folders = lists
+		})
+	}()
+}
+
 // playlistChanged forgets what was loaded of playlist id, which its source
 // changed: loaded anew if shown, and the sidebar's covers with it.
 func (a *app) playlistChanged(lib *library, id string) {

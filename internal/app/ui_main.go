@@ -283,6 +283,7 @@ func (a *app) sidebar(c *ui.Context) {
 				a.myPlaylists(c, T("My Playlists"), a.mine, true, &a.mineCollapsed)
 				a.myPlaylists(c, T("Saved Playlists"), a.saved, false, &a.savedCollapsed)
 			}
+			a.localMusic(c)
 		})
 
 		a.accountRow(c)

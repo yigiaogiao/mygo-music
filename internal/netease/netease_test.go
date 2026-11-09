@@ -35,8 +35,8 @@ func fakeNetease(t *testing.T, songs []song, lyric func(id string) any) *Client 
 func known(id int64) song {
 	return song{
 		ID: id, Name: "Song", Duration: 180000,
-		Artists: []struct{ Name string }{{Name: "Band"}},
-		Album:   struct{ Name string }{Name: "Record"},
+		Artists: []credit{{Name: "Band"}},
+		Album:   albumInfo{Name: "Record"},
 	}
 }
 
@@ -120,8 +120,8 @@ func TestLookupIgnoresAnotherSong(t *testing.T) {
 func TestLookupAsksInSimplified(t *testing.T) {
 	c := fakeNetease(t,
 		[]song{{ID: 7, Name: "梵高先生", Duration: 250000,
-			Artists: []struct{ Name string }{{Name: "李志"}},
-			Album:   struct{ Name string }{Name: "梵高先生2005"}}},
+			Artists: []credit{{Name: "李志"}},
+			Album:   albumInfo{Name: "梵高先生2005"}}},
 		func(id string) any { return lyricJSON("[00:01.00]words") })
 	lrc, err := c.Lookup(context.Background(), songmatch.Track{Title: "08梵高先生", Artist: "李誌", Duration: 250 * time.Second})
 	if err != nil {
@@ -129,5 +129,33 @@ func TestLookupAsksInSimplified(t *testing.T) {
 	}
 	if lrc != "[00:01.00]words" {
 		t.Errorf("lyrics %q", lrc)
+	}
+}
+
+func TestCoverFindsTheClosestAlbumArt(t *testing.T) {
+	far := known(1)
+	far.Album = albumInfo{Name: "Other", PicURL: "http://p1.example/other.jpg"}
+	near := known(2)
+	near.Album = albumInfo{Name: "Record", PicURL: "http://p2.example/record.jpg"}
+	c := fakeNetease(t, []song{far, near}, func(string) any { return nil })
+	art, err := c.Cover(context.Background(), songmatch.Track{Album: "Record", Artist: "Band"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if art != "http://p2.example/record.jpg" {
+		t.Errorf("art %q", art)
+	}
+}
+
+func TestCoverIgnoresAnotherAlbum(t *testing.T) {
+	s := known(1)
+	s.Album = albumInfo{Name: "Other", PicURL: "http://p1.example/other.jpg"}
+	c := fakeNetease(t, []song{s}, func(string) any { return nil })
+	art, err := c.Cover(context.Background(), songmatch.Track{Album: "Record", Artist: "Band"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if art != "" {
+		t.Errorf("art %q", art)
 	}
 }

@@ -64,7 +64,7 @@ type Player struct {
 	track   *music.Track
 	out     *audio.Player
 	stream  stream
-	watch   *watched // stream, as out plays it
+	watch   *watched      // stream, as out plays it
 	info    *music.Stream // what the current track streams
 	fade    fader
 	gain    float64 // the current track's normalizing gain
@@ -352,6 +352,9 @@ func (p *Player) ToggleShuffle() {
 }
 
 func (p *Player) CycleRepeat() { p.repeat = (p.repeat + 1) % 3 }
+
+// SetRepeat makes the player repeat as mode says.
+func (p *Player) SetRepeat(mode RepeatMode) { p.repeat = mode }
 
 // Current returns the track playing or loading, or nil.
 func (p *Player) Current() *music.Track { return p.track }

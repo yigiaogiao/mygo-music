@@ -131,3 +131,17 @@ func TestLookupAsksInSimplified(t *testing.T) {
 		t.Errorf("lyrics %q", lrc)
 	}
 }
+
+func TestCoverFromTheAlbumID(t *testing.T) {
+	s := mid("001")
+	s.AlbumMid = "002Zexample"
+	c := fakeQQ(t, []song{s}, func(string) any { return nil })
+	art, err := c.Cover(context.Background(), songmatch.Track{Album: "Record", Artist: "Band"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "https://y.qq.com/music/photo_new/T002R300x300M000002Zexample.jpg"
+	if art != want {
+		t.Errorf("art %q, want %q", art, want)
+	}
+}

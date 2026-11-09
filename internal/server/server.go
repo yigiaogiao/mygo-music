@@ -54,6 +54,10 @@ type Server struct {
 	// langMu serializes calls, as the language of what a source says is
 	// global.
 	langMu sync.Mutex
+
+	// coverMu guards covers, the art being looked up, by its key.
+	coverMu sync.Mutex
+	covers  map[string]*coverLoad
 }
 
 // New opens the library in cfg.DataDir and starts scanning what it holds.
@@ -76,7 +80,7 @@ func New(cfg Config) (*Server, error) {
 	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
 		return nil, fmt.Errorf("data directory: %w", err)
 	}
-	s := &Server{cfg: cfg, library: filepath.Join(cfg.DataDir, "library")}
+	s := &Server{cfg: cfg, library: filepath.Join(cfg.DataDir, "library"), covers: map[string]*coverLoad{}}
 	if err := os.MkdirAll(s.library, 0o755); err != nil {
 		return nil, fmt.Errorf("library directory: %w", err)
 	}
@@ -110,6 +114,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/call", s.call)
 	s.mux.HandleFunc("/api/audio/", func(w http.ResponseWriter, r *http.Request) { s.media(w, r, "audio") })
 	s.mux.HandleFunc("/api/asset/", func(w http.ResponseWriter, r *http.Request) { s.media(w, r, "asset") })
+	s.mux.HandleFunc("/api/cover/", s.cover)
 	s.mux.HandleFunc("/setup", s.setup)
 	s.mux.HandleFunc("/", s.static)
 }

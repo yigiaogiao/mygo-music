@@ -53,16 +53,7 @@ func (c *Client) Lookup(ctx context.Context, t songmatch.Track) (string, error) 
 	}
 	var fits []found
 	for _, s := range songs {
-		artist := make([]string, len(s.Singer))
-		for i, a := range s.Singer {
-			artist[i] = a.Name
-		}
-		fit := songmatch.Score(songmatch.Track{
-			Title:    s.SongName,
-			Artist:   strings.Join(artist, "/"),
-			Album:    s.AlbumName,
-			Duration: time.Duration(s.Interval) * time.Second,
-		}, t)
+		fit := c.fit(s, t)
 		if fit >= 2 {
 			fits = append(fits, found{mid: s.SongMid, fit: fit})
 		}
@@ -85,12 +76,18 @@ type song struct {
 	SongName  string                  `json:"songname"`
 	Interval  int64                   `json:"interval"` // seconds
 	AlbumName string                  `json:"albumname"`
+	AlbumMid  string                  `json:"albummid"`
 	Singer    []struct{ Name string } `json:"singer"`
 }
 
 func (c *Client) search(ctx context.Context, t songmatch.Track) ([]song, error) {
 	q := url.Values{}
-	q.Set("w", strings.TrimSpace(t.Title+" "+t.Artist))
+	query := t.Title
+	if query == "" {
+		// An album's cover is found by the album's name.
+		query = t.Album
+	}
+	q.Set("w", strings.TrimSpace(query+" "+t.Artist))
 	q.Set("format", "json")
 	q.Set("n", "20")
 	q.Set("p", "1")
@@ -105,6 +102,48 @@ func (c *Client) search(ctx context.Context, t songmatch.Track) ([]song, error) 
 		return nil, err
 	}
 	return out.Data.Song.List, nil
+}
+
+// Cover finds the album art of t, by its album's ID at QQ Music. It answers
+// "" and no error when QQ Music has none.
+func (c *Client) Cover(ctx context.Context, t songmatch.Track) (string, error) {
+	t = songmatch.Normalize(t)
+	songs, err := c.search(ctx, t)
+	if err != nil {
+		return "", err
+	}
+	mid, fit := "", 0
+	for _, s := range songs {
+		if s.AlbumMid == "" {
+			continue
+		}
+		// An album's art is the art of the album asked for, not of
+		// another by the same artist.
+		if t.Title == "" && !strings.EqualFold(strings.TrimSpace(s.AlbumName), t.Album) {
+			continue
+		}
+		if n := c.fit(s, t); n > fit {
+			mid, fit = s.AlbumMid, n
+		}
+	}
+	if fit < 2 {
+		return "", nil
+	}
+	return "https://y.qq.com/music/photo_new/T002R300x300M000" + mid + ".jpg", nil
+}
+
+// fit scores how well s is the song t: its title, artist, album and length.
+func (c *Client) fit(s song, t songmatch.Track) int {
+	artist := make([]string, len(s.Singer))
+	for i, a := range s.Singer {
+		artist[i] = a.Name
+	}
+	return songmatch.Score(songmatch.Track{
+		Title:    s.SongName,
+		Artist:   strings.Join(artist, "/"),
+		Album:    s.AlbumName,
+		Duration: time.Duration(s.Interval) * time.Second,
+	}, t)
 }
 
 // timed is a line of LRC, which plain words lack.

@@ -47,6 +47,7 @@ var can = map[string]bool{
 	"createPlaylist": true, "renamePlaylist": true, "deletePlaylist": true,
 	"addToPlaylist": true, "removeFromPlaylist": true, "movePlaylistTrack": true,
 	"lyrics": true, "stream": true, "home": true, "browse": true,
+	"localFolders": true,
 }
 
 // Source is a music.Source of the files in the listener's folders. It's safe
@@ -289,10 +290,66 @@ func (s *Source) Playlists() ([]music.Playlist, error) {
 	return lists, nil
 }
 
+// folderIDPrefix keeps a folder's ID apart from the playlists the listener
+// made, whose IDs are 16 hex digits.
+const folderIDPrefix = "folder:"
+
+func folderID(path string) string { return folderIDPrefix + makeID("folder", path) }
+
+// FolderPlaylists lists each folder scanned as a playlist of its songs, in
+// path order: Local Music in the sidebar.
+func (s *Source) FolderPlaylists() ([]music.Playlist, error) {
+	cat := s.cat.Load()
+	s.mu.RLock()
+	folders := slices.Clone(s.lib.Folders)
+	s.mu.RUnlock()
+	lists := make([]music.Playlist, 0, len(folders))
+	for _, folder := range folders {
+		items := itemsWithin(cat, folder)
+		pl := music.Playlist{ID: folderID(folder), Name: filepath.Base(folder), Mine: true, TrackCount: len(items)}
+		if len(items) > 0 {
+			pl.ImageURL = items[0].imageURL
+		}
+		lists = append(lists, pl)
+	}
+	return lists, nil
+}
+
+// itemsWithin returns what the catalog has under folder, in path order.
+func itemsWithin(cat *catalog, folder string) []*item {
+	var items []*item
+	for _, it := range cat.items {
+		if within(it.Path, folder) {
+			items = append(items, it)
+		}
+	}
+	slices.SortFunc(items, func(a, b *item) int { return cmp.Compare(a.Path, b.Path) })
+	return items
+}
+
+// folderWithID returns the folder id names, which is one of those scanned.
+func (s *Source) folderWithID(id string) (string, bool) {
+	for _, folder := range s.lib.Folders {
+		if folderID(folder) == id {
+			return folder, true
+		}
+	}
+	return "", false
+}
+
 func (s *Source) Playlist(id string) (*music.Playlist, error) {
 	cat := s.cat.Load()
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if folder, ok := s.folderWithID(id); ok {
+		items := itemsWithin(cat, folder)
+		out := music.Playlist{ID: id, Name: filepath.Base(folder), Mine: true, TrackCount: len(items)}
+		if len(items) > 0 {
+			out.ImageURL = items[0].imageURL
+		}
+		out.Tracks = publicTracks(items)
+		return &out, nil
+	}
 	p := s.lib.playlist(id)
 	if p == nil {
 		return nil, noPlaylist(id)

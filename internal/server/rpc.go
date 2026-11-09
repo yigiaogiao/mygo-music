@@ -127,6 +127,8 @@ func (s *Server) dispatch(ctx context.Context, r *http.Request, method string, r
 		return s.local.Suggest(query)
 	case "Playlists":
 		return s.local.Playlists()
+	case "FolderPlaylists":
+		return s.local.FolderPlaylists()
 	case "Playlist":
 		var id string
 		if err := args(raw, &id); err != nil {
@@ -509,6 +511,11 @@ func (s *Server) rewriteValue(r *http.Request, v any) any {
 		}
 		return x
 	case map[string]any:
+		if u := s.onlineCover(r, x); u != "" {
+			x["album"].(map[string]any)["imageUrl"] = u
+		} else if u := s.onlineAlbumCover(r, x); u != "" {
+			x["imageUrl"] = u
+		}
 		for k := range x {
 			// The library is the browser's source, not the local one the
 			// server wraps: tracks have to say so to play through it.

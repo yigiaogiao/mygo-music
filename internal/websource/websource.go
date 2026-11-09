@@ -30,6 +30,7 @@ var can = map[string]bool{
 	"createPlaylist": true, "renamePlaylist": true, "deletePlaylist": true,
 	"addToPlaylist": true, "removeFromPlaylist": true, "movePlaylistTrack": true,
 	"lyrics": true, "stream": true, "home": true, "browse": true,
+	"localFolders": true,
 }
 
 // Status is what the server says of the library, for the settings.
@@ -301,6 +302,16 @@ func (s *Source) Suggest(query string) ([]string, error) {
 	var out []string
 	err := s.call("Suggest", []any{query}, &out)
 	return out, err
+}
+
+// FolderPlaylists lists the folders the server reads as playlists of their
+// songs.
+func (s *Source) FolderPlaylists() ([]music.Playlist, error) {
+	var out []music.Playlist
+	if err := s.call("FolderPlaylists", nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (s *Source) Playlists() ([]music.Playlist, error) {

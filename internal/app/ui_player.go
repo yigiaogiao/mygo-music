@@ -225,6 +225,7 @@ func (a *app) nativeVolumeSlider(c *ui.Context, pop popover) {
 		Step(0.01).AutoFocus().FocusRing(false).Label(T("Volume"))
 	if s.Changed() {
 		a.pl.SetVolume(a.volume)
+		saveVolume(a.volume)
 	}
 	s.HandleInput(func(ev ui.InputEvent) bool { return a.scrollVolume(ev) })
 	pressed := s.Pressed()
@@ -255,6 +256,7 @@ func (a *app) scrollVolume(ev ui.InputEvent) bool {
 	}
 	a.volume = min(1, max(0, a.volume-float64(ev.DY)/400))
 	a.pl.SetVolume(a.volume)
+	saveVolume(a.volume)
 	return true
 }
 
@@ -310,8 +312,8 @@ func (a *app) volumeSlider(c *ui.Context, color, track ui.Color, width float32) 
 }
 
 // transport is the row of controls: the play mode, previous, play, next. One
-// button is the mode, as a player plays straight on, shuffles, repeats the
-// queue, or repeats one song.
+// button is the mode: play the queue in order, shuffle it, or repeat one
+// song.
 func (a *app) transport(c *ui.Context, color, dim, on ui.Color, size float32) {
 	pl := a.pl
 	ui.Row(c).Gap(size * 0.5).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
@@ -340,19 +342,17 @@ func (a *app) transport(c *ui.Context, color, dim, on ui.Color, size float32) {
 }
 
 // nextPlayMode takes the player to the next mode: straight on, shuffle,
-// repeat the queue, repeat one song, and round again.
+// repeat one song, and round again.
 func (a *app) nextPlayMode() {
 	pl := a.pl
 	switch {
 	case pl.Shuffle():
 		pl.ToggleShuffle()
-		pl.CycleRepeat() // off to all
-	case pl.Repeat() == player.RepeatOff:
-		pl.ToggleShuffle() // on
-	case pl.Repeat() == player.RepeatAll:
-		pl.CycleRepeat() // to one
+		pl.SetRepeat(player.RepeatOne)
+	case pl.Repeat() == player.RepeatOne:
+		pl.SetRepeat(player.RepeatOff)
 	default:
-		pl.CycleRepeat() // one to off
+		pl.ToggleShuffle() // on
 	}
 }
 

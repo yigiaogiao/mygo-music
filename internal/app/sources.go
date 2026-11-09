@@ -28,7 +28,7 @@ func N(text string) string { return i18n.N(text) }
 var capabilities = []string{
 	"signIn", "signOut", "account",
 	"search", "suggest",
-	"playlists", "playlist", "album", "artist", "liked", "recent",
+	"playlists", "localFolders", "playlist", "album", "artist", "liked", "recent",
 	"home", "browse",
 	"isLiked", "like", "likeEpisode",
 	"createPlaylist", "renamePlaylist", "deletePlaylist", "addToPlaylist", "removeFromPlaylist", "movePlaylistTrack", "savePlaylist",
@@ -70,6 +70,8 @@ type library struct {
 
 	mine, saved []music.Playlist // the listener's playlists: made, and saved
 	mineAt      time.Time        // when they were last asked for
+	folders     []music.Playlist // the source's folders, as lists of their songs
+	foldersAt   time.Time        // when they were last asked for
 	savingPl    map[string]bool  // the playlists whose saving or its end is on its way
 
 	liked      map[string]bool // the tracks known to be liked, or not
@@ -195,6 +197,7 @@ func (a *app) startLibrary(lib *library) {
 	lib.started = true
 	a.loadAccount(lib)
 	a.loadMine(lib)
+	a.loadFolders(lib)
 	a.loadHome(lib)
 }
 
@@ -319,6 +322,7 @@ func (a *app) libraryChanged(lib *library) {
 		}
 	}
 	a.loadMine(lib)
+	a.loadFolders(lib)
 	a.loadHome(lib)
 	if a.route.src == lib.id {
 		a.reload(a.route)

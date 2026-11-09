@@ -80,6 +80,7 @@ func (a *app) pickFolder(add bool, path string) {
 				f.err = err.Error()
 				return
 			}
+			a.loadFolders(a.library)
 			a.browseFolders(at)
 		})
 	}()
@@ -193,7 +194,9 @@ func (a *app) folderChosen(c *ui.Context, p palette, page *websource.FolderPage)
 	})
 }
 
-// folderDirs lists the folders under the one shown, to go into or to add.
+// folderDirs lists the folders under the one shown, each to go into: the
+// folder read is the one the listener has made their way to, and the one
+// button over the list adds it, as a folder picker does.
 func (a *app) folderDirs(c *ui.Context, p palette, page *websource.FolderPage) {
 	ui.Scroll(c.Key("dirs")).Grow(1).MinHeight(0).Radius(10).Border(1, p.hairline).Children(func() {
 		for _, d := range page.Dirs {
@@ -208,14 +211,13 @@ func (a *app) folderDirs(c *ui.Context, p palette, page *websource.FolderPage) {
 					if d.Symlink {
 						ui.Text(c, "↗").FontSize(11).TextColor(p.faint)
 					}
+					if d.Added {
+						ui.Text(c, T("Added")).FontSize(11.5).TextColor(p.muted)
+					}
+					ui.Icon(c, iconForward).Size(13, 13).TextColor(p.faint)
 				})
 				if b.Clicked() {
 					a.browseFolders(d.Path)
-				}
-				if d.Added {
-					ui.Text(c, T("Added")).FontSize(12).TextColor(p.muted).Margin(0, 8, 0, 8)
-				} else if ui.Button(c.Key("add"), T("Add")).Clicked() {
-					a.pickFolder(true, d.Path)
 				}
 			})
 		}

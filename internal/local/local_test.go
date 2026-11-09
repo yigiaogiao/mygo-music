@@ -1410,3 +1410,49 @@ func TestWAVWithID3(t *testing.T) {
 		t.Errorf("track: %+v", tr)
 	}
 }
+
+// Each folder the library reads is a playlist of its songs, in path order,
+// apart from the playlists the listener makes.
+func TestFolderPlaylists(t *testing.T) {
+	root := t.TempDir()
+	one := filepath.Join(root, "In the west")
+	two := filepath.Join(root, "Downloads")
+	art := [2]string{"APIC", string(jpegData)}
+	write(t, filepath.Join(one, "b.mp3"), mp3With(t, [2]string{"TIT2", "Bee"}))
+	write(t, filepath.Join(one, "a.mp3"), mp3With(t, [2]string{"TIT2", "Aye"}, art))
+	write(t, filepath.Join(one, "sub", "c.mp3"), mp3With(t, [2]string{"TIT2", "Sea"}))
+	write(t, filepath.Join(two, "x.mp3"), mp3With(t, [2]string{"TIT2", "Ex"}))
+
+	s := New(t.TempDir())
+	s.AddFolders(one, two)
+	wait(t, s)
+	s.CreatePlaylist("Mine")
+
+	folders, err := s.FolderPlaylists()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(folders) != 2 {
+		t.Fatalf("%d folders: %+v", len(folders), folders)
+	}
+	if f := folders[0]; f.Name != "In the west" || f.TrackCount != 3 || f.ID != folderID(one) || f.ImageURL == "" || !f.Mine {
+		t.Errorf("first folder: %+v", f)
+	}
+	if f := folders[1]; f.Name != "Downloads" || f.TrackCount != 1 || f.ID != folderID(two) {
+		t.Errorf("second folder: %+v", f)
+	}
+
+	pl, err := s.Playlist(folderID(one))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := names(pl.Tracks); !slices.Equal(got, []string{"Aye", "Bee", "Sea"}) {
+		t.Errorf("tracks: %q", got)
+	}
+
+	// The listener's own playlists stay apart from the folders.
+	mine, _ := s.Playlists()
+	if len(mine) != 1 || mine[0].Name != "Mine" {
+		t.Errorf("playlists: %+v", mine)
+	}
+}
