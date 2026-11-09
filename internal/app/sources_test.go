@@ -1114,19 +1114,17 @@ func TestFollowSystemLanguage(t *testing.T) {
 // The settings' sidebar opens its pages, one at a time.
 func TestSettingsSidebarOpensPages(t *testing.T) {
 	a := newTestApp()
-	// A plugin may have a quality to choose.
-	a.libs = append(a.libs, &library{src: &plugin.Plugin{}})
 	tt := ui.NewTester(a.settingsView, 780, 800)
 	tt.Frame()
 	if _, ok := tt.Find("Language"); !ok {
 		t.Fatalf("General isn't the first page: %q", tt.Texts())
 	}
-	if err := tt.Click("Playback"); err != nil {
+	if err := tt.Click("Experiments"); err != nil {
 		t.Fatal(err)
 	}
 	settled(tt)
-	if _, ok := tt.Find("Quality"); !ok {
-		t.Errorf("no Quality on Playback: %q", tt.Texts())
+	if _, ok := tt.Find("Smoke on the Progress Bar"); !ok {
+		t.Errorf("no Smoke on the Progress Bar on Experiments: %q", tt.Texts())
 	}
 	if _, ok := tt.Find("Language"); ok {
 		t.Error("General's still showing")
@@ -1137,22 +1135,20 @@ func TestSettingsSidebarOpensPages(t *testing.T) {
 // nothing says so; and choosing a page leaves it.
 func TestSettingsSearch(t *testing.T) {
 	a := newTestApp()
-	// A plugin may have a quality to choose, which a search finds.
-	a.libs = append(a.libs, &library{src: &plugin.Plugin{}})
 	tt := ui.NewTester(a.settingsView, 780, 800)
 	tt.Frame()
 	if err := tt.Click("Search Settings"); err != nil {
 		t.Fatal(err)
 	}
-	tt.Type("QUALITY")
+	tt.Type("SMOKE")
 	settled(tt)
-	if _, ok := tt.Find("Quality"); !ok {
+	if _, ok := tt.Find("Smoke on the Progress Bar"); !ok {
 		t.Fatalf("didn't find it: %q", tt.Texts())
 	}
 	if _, ok := tt.Find("Language"); ok {
 		t.Error("shows what it didn't look for")
 	}
-	if _, ok := tt.Find("Even Out Loudness"); ok {
+	if _, ok := tt.Find("Fog Backdrop"); ok {
 		t.Error("shows a row of the same page it didn't look for")
 	}
 
@@ -1163,9 +1159,9 @@ func TestSettingsSearch(t *testing.T) {
 	}
 
 	// By a page's name, all of it.
-	a.settingsQuery = "playback"
+	a.settingsQuery = "experiments"
 	settled(tt)
-	if _, ok := tt.Find("Even Out Loudness"); !ok {
+	if _, ok := tt.Find("Fog Backdrop"); !ok {
 		t.Errorf("the page's rows aren't there: %q", tt.Texts())
 	}
 
@@ -1181,19 +1177,19 @@ func TestSettingsSearch(t *testing.T) {
 // A control a search found works as on its page.
 func TestSettingsFoundControlWorks(t *testing.T) {
 	a := newTestApp()
-	a.settingsQuery = "loudness"
+	a.settingsQuery = "smoke"
 	tt := ui.NewTester(a.settingsView, 780, 800)
 	settled(tt)
-	was := a.settings.Normalize
+	was := a.settings.Smoke
 	// The row's title is labelled as its switch is: click the switch, at its end.
-	top, ok1 := tt.Find("Even Out Loudness")
-	bottom, ok2 := tt.Find("Adjust each song's volume by what its plugin measured of it, for them to sound as loud as each other")
+	top, ok1 := tt.Find("Smoke on the Progress Bar")
+	bottom, ok2 := tt.Find("The progress bar turns into a light trailing smoke, moving with the music. Uses a little more power.")
 	if !ok1 || !ok2 {
 		t.Fatalf("not found: %q", tt.Texts())
 	}
 	tt.ClickAt(780-28-16-12, (top.Y+bottom.Y+bottom.H)/2)
 	tt.Frame()
-	if a.settings.Normalize == was {
+	if a.settings.Smoke == was {
 		t.Error("the switch did nothing")
 	}
 }

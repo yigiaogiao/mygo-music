@@ -64,9 +64,6 @@ type settings struct {
 	StageSparks bool `json:"stageSparks,omitempty"`
 	// Volume is where the volume was left, from 0 to 1.
 	Volume float64 `json:"volume"`
-	// Normalize evens out the loudness of tracks, by what their source
-	// measured of each.
-	Normalize bool `json:"normalize"`
 	// HotComments shows a song's top comments in its quiet parts, in place of
 	// the lyrics (quietComment), for a source with comments: the listener
 	// turns it on.
@@ -88,7 +85,7 @@ type settings struct {
 }
 
 func defaultSettings() settings {
-	return settings{Language: i18n.System, NotchActivity: true, Quality: "high", Appearance: "system", Volume: 0.8, Normalize: true, AppIcon: "dock-and-menubar", CacheMB: 2048}
+	return settings{Language: i18n.System, NotchActivity: true, Quality: "high", Appearance: "system", Volume: 0.8, AppIcon: "dock-and-menubar", CacheMB: 2048}
 }
 
 func settingsPath() (string, error) {
@@ -142,13 +139,6 @@ func (s settings) applyAppearance() {
 	if src != mygo.Theme.Source() {
 		mygo.Theme.SetSource(src)
 	}
-}
-
-// qualityLevels are what can be asked of sources, by what they sound like.
-var qualityLevels = []struct{ level, label string }{
-	{"standard", N("Standard")},
-	{"high", N("High")},
-	{"lossless", N("Lossless")},
 }
 
 // cacheLimits are the sizes the song cache may take, in megabytes.

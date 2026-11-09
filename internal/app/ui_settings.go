@@ -472,40 +472,6 @@ func (a *app) settingsSections(c *ui.Context, p palette) []settingsSection {
 		})
 	}
 
-	add("playback", T("Playback"), iconVolume, func(row settingsRow, block settingsBlock) {
-		// The netdisk, and files of the listener's own, play as they are: only
-		// a plugin may have a choice.
-		if a.sourcesChooseQuality() {
-			row(T("Quality"), T("What's asked of plugins that have a choice, from the next song on"), func() {
-				labels := make([]string, len(qualityLevels))
-				at := 1
-				for i, q := range qualityLevels {
-					labels[i] = q.label
-					if q.level == s.Quality {
-						at = i
-					}
-				}
-				if i, ok := choice(c, "quality", T("Quality"), labels, at); ok {
-					s.Quality = qualityLevels[i].level
-					a.changed()
-				}
-			})
-		}
-		if a.anyCan("comments") {
-			row(T("Top Comments in Quiet Parts"), T("In intros, breaks and outros, a song's top comments show in place of the lyrics"), func() {
-				if ui.Switch(c.Key("hot-comments"), &s.HotComments).Label(T("Top Comments in Quiet Parts")).Changed() {
-					a.changed()
-				}
-			})
-		}
-		row(T("Even Out Loudness"), T("Adjust each song's volume by what its plugin measured of it, for them to sound as loud as each other"), func() {
-			if ui.Switch(c.Key("normalize"), &s.Normalize).Label(T("Even Out Loudness")).Changed() {
-				a.pl.SetVolume(a.volume)
-				a.changed()
-			}
-		})
-	})
-
 	if !webBuild() {
 		add("cache", T("Cache"), iconDatabase, func(row settingsRow, block settingsBlock) {
 			row(T("Song Cache"), Tf("Songs from elsewhere are kept here to play again at once, without the network. %s", a.cacheUsage()), func() {
@@ -589,13 +555,6 @@ func (a *app) anyCan(what string) bool {
 		}
 	}
 	return false
-}
-
-// sourcesChooseQuality reports whether a source on can take the quality asked
-// of it. The built-in source and the netdisk play files as they are; a plugin
-// may ask for another.
-func (a *app) sourcesChooseQuality() bool {
-	return slices.ContainsFunc(a.libs, func(l *library) bool { return pluginOf(l) != nil })
 }
 
 // sourceSettings lists the sources, each with what it asks of the listener,

@@ -375,7 +375,9 @@ func Run() error {
 		a.pl.Source = a.sourceByID
 		a.pl.Failed = a.sourceFailed
 		a.pl.Quality = func() string { return a.settings.Quality }
-		a.pl.Normalize = func() bool { return a.settings.Normalize }
+		// Always evened out: a song with ReplayGain tags plays at the loudness
+		// measured for it, and one without is left as it is.
+		a.pl.Normalize = func() bool { return true }
 		a.pl.Cache = newSongCache(a.settings.CacheMB)
 		a.pl.Changed = func() {
 			a.keepSession()
