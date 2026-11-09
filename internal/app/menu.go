@@ -19,11 +19,17 @@ func (a *app) setMenu() {
 	name := mygo.App.Name()
 	appMenu := []*mygo.MenuItem{
 		{Role: mygo.RoleAbout, Label: Tf("About %s", name)},
-		{Label: T("Check for Updates…"), Click: run(checkForUpdates)},
-		mygo.Separator(),
-		{Label: T("Settings…"), Accelerator: "CmdOrCtrl+,", Click: run(a.openSettings)},
-		mygo.Separator(),
 	}
+	// A build that can't update itself has nothing for the item to check, and
+	// the updates page is gone with it.
+	if a.updates {
+		appMenu = append(appMenu, &mygo.MenuItem{Label: T("Check for Updates…"), Click: run(checkForUpdates)})
+	}
+	appMenu = append(appMenu,
+		mygo.Separator(),
+		&mygo.MenuItem{Label: T("Settings…"), Accelerator: "CmdOrCtrl+,", Click: run(a.openSettings)},
+		mygo.Separator(),
+	)
 	// Services and hiding are macOS's alone. Elsewhere MyGo leaves their
 	// items out but keeps the separators around them, which then stack.
 	if runtime.GOOS == "darwin" {

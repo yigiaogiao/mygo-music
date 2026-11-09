@@ -120,7 +120,7 @@ func (a *app) trayMenu() *mygo.Menu {
 		}
 	}
 	name := mygo.App.Name()
-	return mygo.NewMenu([]*mygo.MenuItem{
+	items := []*mygo.MenuItem{
 		{Label: Tf("Open %s", name), Click: run(a.showMain)},
 		mygo.Separator(),
 		{Label: T("Play/Pause"), Click: run(func() { a.pl.TogglePlay() })},
@@ -129,8 +129,14 @@ func (a *app) trayMenu() *mygo.Menu {
 		{Label: T("Like/Unlike"), Click: run(a.likeCurrent)},
 		mygo.Separator(),
 		{Label: T("Settings…"), Click: run(front(a.openSettings))},
-		{Label: T("Check for Updates…"), Click: run(front(checkForUpdates))},
+	}
+	// A build that can't update itself has nothing for the item to check.
+	if a.updates {
+		items = append(items, &mygo.MenuItem{Label: T("Check for Updates…"), Click: run(front(checkForUpdates))})
+	}
+	items = append(items,
 		mygo.Separator(),
-		{Label: Tf("Quit %s", name), Click: func(*mygo.MenuItem, *mygo.Window) { mygo.App.Quit() }},
-	})
+		&mygo.MenuItem{Label: Tf("Quit %s", name), Click: func(*mygo.MenuItem, *mygo.Window) { mygo.App.Quit() }},
+	)
+	return mygo.NewMenu(items)
 }

@@ -29,7 +29,10 @@ func (a *app) useUpdater(language string) {
 		tag = "zh-Hans"
 	}
 	mygo.Use(native.New(updater.Options{Language: tag}))
-	a.updates = true
+	// The browser, and a build that can't write where it's installed, load
+	// the newest version with the page or their package manager: they have
+	// no page for updates to show.
+	a.updates = mygo.Updater.Enabled()
 	// A check or an answer in the update window changes what the settings
 	// show.
 	updater.OnChange(func() {

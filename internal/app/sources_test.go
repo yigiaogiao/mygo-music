@@ -1114,6 +1114,8 @@ func TestFollowSystemLanguage(t *testing.T) {
 // The settings' sidebar opens its pages, one at a time.
 func TestSettingsSidebarOpensPages(t *testing.T) {
 	a := newTestApp()
+	// A plugin may have a quality to choose.
+	a.libs = append(a.libs, &library{src: &plugin.Plugin{}})
 	tt := ui.NewTester(a.settingsView, 780, 800)
 	tt.Frame()
 	if _, ok := tt.Find("Language"); !ok {
@@ -1135,6 +1137,8 @@ func TestSettingsSidebarOpensPages(t *testing.T) {
 // nothing says so; and choosing a page leaves it.
 func TestSettingsSearch(t *testing.T) {
 	a := newTestApp()
+	// A plugin may have a quality to choose, which a search finds.
+	a.libs = append(a.libs, &library{src: &plugin.Plugin{}})
 	tt := ui.NewTester(a.settingsView, 780, 800)
 	tt.Frame()
 	if err := tt.Click("Search Settings"); err != nil {
