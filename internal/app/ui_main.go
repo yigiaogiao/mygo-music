@@ -40,6 +40,7 @@ func (a *app) view(c *ui.Context) {
 	useAccent(&t, p)
 	t.Selection = p.accent.Alpha(0.3)
 	c.SetTheme(&t)
+	setPageColor(t.Dark)
 
 	a.shortcuts(c)
 
