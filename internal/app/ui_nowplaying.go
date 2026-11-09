@@ -398,7 +398,7 @@ func (a *app) nowPlayingBody(c *ui.Context, tr *music.Track, art *artwork, accen
 					ui.Text(c, status).FontSize(11).FontFeatures("tnum").TextColor(white.Alpha(0.5))
 				})
 				a.npRise(ui.Box(c).Margin(14, 0, 18, 0), 3).Children(func() {
-					a.transport(c, white, white.Alpha(0.45), accent, 28)
+					a.transport(c, white, accent, 28)
 				})
 				a.npRise(ui.Row(c).Justify(ui.Center), 4).Children(func() {
 					a.volumeSlider(c, white.Alpha(0.7), white.Alpha(0.18), 180)
@@ -491,7 +491,7 @@ func (a *app) nowPlayingCompact(c *ui.Context, tr *music.Track, art *artwork, ac
 			ui.Text(c, status).FontSize(11).FontFeatures("tnum").TextColor(white.Alpha(0.5))
 		})
 		a.npRise(ui.Box(c).Margin(6, 0, 8, 0), 3).Children(func() {
-			a.transport(c, white, white.Alpha(0.45), accent, 24)
+			a.transport(c, white, accent, 24)
 		})
 		tabs := ui.Row(c).Height(npTabsHeight).Gap(4).AlignItems(ui.Center).ClipX()
 		a.npRise(tabs, 0).Children(func() {
@@ -670,7 +670,7 @@ func (a *app) stageBar(c *ui.Context, tr *music.Track, art *artwork, accent ui.C
 					a.songMenu(c.Key("more"), tr, 17, white.Alpha(0.6)).Margin(0, 0, 0, -10)
 				})
 			})
-			a.npRise(ui.Row(c), 3).Children(func() { a.transport(c, white, white.Alpha(0.45), white, 22) })
+			a.npRise(ui.Row(c), 3).Children(func() { a.transport(c, white, white, 22) })
 			a.npRise(ui.Row(c).Grow(1).Basis(0).MinWidth(0).Justify(ui.End), 4).Children(func() {
 				ui.Text(c, clock(pl.Position())+" / "+clock(pl.Duration())).FontSize(11.5).FontFeatures("tnum").TextColor(white.Alpha(0.5))
 			})

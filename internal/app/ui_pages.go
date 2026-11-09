@@ -522,23 +522,54 @@ func (a *app) trackRows(c *ui.Context, tracks []music.Track, covers bool, header
 	// scrolled away from its start or end has content under the bars.
 	a.underTop, a.underBottom = true, true
 	rows := len(tracks) + 1 + len(footer)
-	ui.List(c.Key(a.route), &a.trackList, rows, func(i int) {
-		if i == 0 {
-			ui.Column(c).Children(func() {
-				a.startMark(c)
-				header(c)
-			})
-			return
+	ui.Box(c.Key("rows")).Grow(1).Children(func() {
+		ui.List(c.Key(a.route), &a.trackList, rows, func(i int) {
+			if i == 0 {
+				ui.Column(c).Children(func() {
+					a.startMark(c)
+					header(c)
+				})
+				return
+			}
+			if i == rows-1 {
+				defer a.endMark(c)
+			}
+			if i > len(tracks) {
+				footer[i-len(tracks)-1](c)
+				return
+			}
+			a.trackRow(c, tracks, i-1, covers, pid)
+		}).Grow(1).Padding(top+pageGap, a.pagePadding(c)-12, bottom+32, a.pagePadding(c)-12).ScrollbarInsets(top, 0, bottom, 0)
+		if at := playingAt(a.pl.Current(), tracks); at >= 0 {
+			a.locateButton(c, at, bottom)
 		}
-		if i == rows-1 {
-			defer a.endMark(c)
+	})
+}
+
+// playingAt returns where in tracks the track tr is, or -1.
+func playingAt(tr *music.Track, tracks []music.Track) int {
+	for i := range tracks {
+		if sameTrack(tr, &tracks[i]) {
+			return i
 		}
-		if i > len(tracks) {
-			footer[i-len(tracks)-1](c)
-			return
-		}
-		a.trackRow(c, tracks, i-1, covers, pid)
-	}).Grow(1).Padding(top+pageGap, a.pagePadding(c)-12, bottom+32, a.pagePadding(c)-12).ScrollbarInsets(top, 0, bottom, 0)
+	}
+	return -1
+}
+
+// locateButton floats over the right of a list whose track plays, above the
+// player bar, and takes the list to it as it's clicked: the row may be far
+// from where the listener is.
+func (a *app) locateButton(c *ui.Context, at int, bottom float32) {
+	p := a.pal
+	b := ui.ButtonBase(c.Key("locate")).Absolute().Right(22).Bottom(bottom+22).Size(40, 40).Radius(999).Center().
+		Background(p.bg).Border(1, p.hairline).Shadow(0, 6, 18, -4, ui.RGBA(0, 0, 0, 0.22)).Label(T("Locate Now Playing"))
+	if b.Hovered() {
+		b.Background(p.hover)
+	}
+	b.Children(func() { ui.Icon(c, iconLocate).Size(17, 17).TextColor(p.accent) })
+	if b.Clicked() {
+		a.trackList.ScrollTo(at+1, ui.Center)
+	}
 }
 
 // sameTrack reports whether two tracks are one: IDs are their source's.

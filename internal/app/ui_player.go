@@ -312,19 +312,17 @@ func (a *app) volumeSlider(c *ui.Context, color, track ui.Color, width float32) 
 }
 
 // transport is the row of controls: the play mode, previous, play, next. One
-// button is the mode: play the queue in order, shuffle it, or repeat one
-// song.
-func (a *app) transport(c *ui.Context, color, dim, on ui.Color, size float32) {
+// button is the mode, in the accent: shuffle the queue, repeat one song, or
+// repeat the queue.
+func (a *app) transport(c *ui.Context, color, on ui.Color, size float32) {
 	pl := a.pl
 	ui.Row(c).Gap(size * 0.5).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
-		mode, icon := dim, iconRepeatOff
+		mode, icon := on, iconRepeat
 		switch {
 		case pl.Shuffle():
-			mode, icon = on, iconShuffle
-		case pl.Repeat() == player.RepeatAll:
-			mode, icon = on, iconRepeat
+			icon = iconShuffle
 		case pl.Repeat() == player.RepeatOne:
-			mode, icon = on, iconRepeat1
+			icon = iconRepeat1
 		}
 		if iconButton(c.Key("mode"), icon, size*0.62, mode, T("Play Mode")).Clicked() {
 			a.nextPlayMode()
@@ -341,8 +339,8 @@ func (a *app) transport(c *ui.Context, color, dim, on ui.Color, size float32) {
 	})
 }
 
-// nextPlayMode takes the player to the next mode: straight on, shuffle,
-// repeat one song, and round again.
+// nextPlayMode takes the player to the next mode: repeat the queue, shuffle
+// it, repeat one song, and round again.
 func (a *app) nextPlayMode() {
 	pl := a.pl
 	switch {
@@ -350,7 +348,7 @@ func (a *app) nextPlayMode() {
 		pl.ToggleShuffle()
 		pl.SetRepeat(player.RepeatOne)
 	case pl.Repeat() == player.RepeatOne:
-		pl.SetRepeat(player.RepeatOff)
+		pl.SetRepeat(player.RepeatAll)
 	default:
 		pl.ToggleShuffle() // on
 	}
@@ -439,7 +437,7 @@ func (a *app) playerBar(c *ui.Context) {
 
 		// Controls over the progress.
 		ui.Column(c).Width(440).Shrink(1).MinWidth(300).Gap(0).AlignItems(ui.Stretch).Children(func() {
-			a.transport(c, p.text, p.muted, p.accent, 18)
+			a.transport(c, p.text, p.accent, 18)
 			ui.Row(c).Gap(10).AlignItems(ui.Center).Margin(-4, 0, 0, 0).Children(func() {
 				ui.Text(c, clock(pl.Position())).FontSize(10.5).FontFeatures("tnum").TextColor(p.faint).Width(34).TextAlign(ui.End)
 				a.scrubber(c.Key("bar-scrub"), &a.barScrub, p.press, p.text.Alpha(0.75), 14, p.accent).Grow(1)

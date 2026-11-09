@@ -106,11 +106,8 @@ func (a *app) folderPickerDialog(c *ui.Context) {
 		})
 		if page := f.page; page != nil {
 			a.folderCrumbs(c, p, page)
-			a.folderHere(c, p, page)
-			if len(page.Folders) > 0 {
-				a.folderChosen(c, p, page)
-			}
 			a.folderDirs(c, p, page)
+			a.folderFooter(c, p, page)
 		} else {
 			ui.Box(c).Grow(1).Center().Children(func() {
 				ui.Text(c, T("Loading…")).FontSize(13).TextColor(p.muted)
@@ -119,89 +116,55 @@ func (a *app) folderPickerDialog(c *ui.Context) {
 		if f.err != "" {
 			ui.Text(c, f.err).FontSize(12.5).TextColor(ui.Hex("#d9455f")).LineHeight(1.4)
 		}
-		ui.Row(c).Gap(10).Justify(ui.End).Children(func() {
-			if pillButton(c.Key("done"), nil, T("Done"), p.accent, p.onAccent).Clicked() {
-				f.open = false
-			}
-		})
 	})
 	if !f.open {
 		f.source = nil
 	}
 }
 
-// folderCrumbs is the way back up to the netdisk's root.
+// folderCrumbs is the way back up to the netdisk's root: the folders gone
+// through, each a click away.
 func (a *app) folderCrumbs(c *ui.Context, p palette, page *websource.FolderPage) {
-	ui.Row(c.Key("crumbs")).Gap(2).AlignItems(ui.Center).ClipX().Children(func() {
-		for i, crumb := range page.Crumbs {
-			if i > 0 {
-				ui.Text(c, "/").FontSize(12).TextColor(p.faint)
-			}
-			at := i == len(page.Crumbs)-1
-			b := ui.ButtonBase(c.Key(crumb.Path)).Height(24).PaddingX(6).Radius(6).AlignItems(ui.Center).FocusRing(false).Label(crumb.Name)
-			if !at && b.Hovered() {
-				b.Background(p.hover)
-			}
-			color := p.muted
-			if at {
-				color = p.text
-			}
-			b.Children(func() {
-				ui.Text(c, crumb.Name).FontSize(12.5).SingleLine().TextColor(color)
-			})
-			if b.Clicked() && !at {
-				a.browseFolders(crumb.Path)
-			}
-		}
-	})
-}
-
-// folderHere is the bar over the folders under the one shown: up, and adding
-// the folder itself.
-func (a *app) folderHere(c *ui.Context, p palette, page *websource.FolderPage) {
-	ui.Row(c.Key("here")).Gap(8).AlignItems(ui.Center).Children(func() {
+	ui.Row(c.Key("crumbs")).Gap(4).AlignItems(ui.Center).Height(30).Children(func() {
 		if !page.AtRoot {
-			if backButton(c.Key("up"), p.muted, p.hover, T("Back")).Clicked() {
+			if backButton(c.Key("up"), p.text, p.hover, T("Back")).Clicked() {
 				a.browseFolders(page.Parent)
 			}
+			ui.Box(c).Width(2)
 		}
-		ui.Text(c, page.Path).FontSize(11.5).TextColor(p.faint).SingleLine().Grow(1).Shrink(1).MinWidth(0)
-		if page.Added {
-			ui.Text(c, T("Added")).FontSize(12).TextColor(p.muted).Margin(0, 4, 0, 0)
-		} else if pillButton(c.Key("add-here"), iconPlus, T("Add This Folder"), p.accent, p.onAccent).Clicked() {
-			a.pickFolder(true, page.Path)
-		}
-	})
-}
-
-// folderChosen lists the folders the library reads now.
-func (a *app) folderChosen(c *ui.Context, p palette, page *websource.FolderPage) {
-	ui.Text(c, T("Selected Folders")).FontSize(11.5).FontWeight(600).TextColor(p.muted)
-	ui.Column(c.Key("chosen")).Radius(10).Background(p.hover).Children(func() {
-		for _, f := range page.Folders {
-			name := f.Name
-			if f.Whole {
-				name = T("The whole netdisk")
-			}
-			ui.Row(c.Key(f.Path)).Padding(6, 10).Gap(8).AlignItems(ui.Center).Children(func() {
-				ui.Icon(c, iconFolder).Size(14, 14).TextColor(p.muted)
-				ui.Text(c, name).FontSize(12.5).SingleLine().Grow(1).Shrink(1).MinWidth(0)
-				if iconButton(c.Key("remove"), iconX, 13, p.muted, T("Remove")).Clicked() {
-					a.pickFolder(false, f.Path)
+		ui.Row(c.Key("path")).Gap(2).AlignItems(ui.Center).Grow(1).Shrink(1).MinWidth(0).ClipX().Children(func() {
+			for i, crumb := range page.Crumbs {
+				if i > 0 {
+					ui.Text(c, "/").FontSize(12).TextColor(p.faint)
 				}
-			})
-		}
+				at := i == len(page.Crumbs)-1
+				b := ui.ButtonBase(c.Key(crumb.Path)).Height(24).PaddingX(6).Radius(6).AlignItems(ui.Center).FocusRing(false).Label(crumb.Name)
+				if !at && b.Hovered() {
+					b.Background(p.hover)
+				}
+				color := p.muted
+				if at {
+					color = p.text
+				}
+				b.Children(func() {
+					ui.Text(c, crumb.Name).FontSize(12.5).SingleLine().TextColor(color)
+				})
+				if b.Clicked() && !at {
+					a.browseFolders(crumb.Path)
+				}
+			}
+		})
 	})
 }
 
-// folderDirs lists the folders under the one shown, each to go into: the
-// folder read is the one the listener has made their way to, and the one
-// button over the list adds it, as a folder picker does.
+// folderDirs lists the folders under the one shown, each to go into: the one
+// the listener makes their way to is the one the footer adds, as a folder
+// chooser does.
 func (a *app) folderDirs(c *ui.Context, p palette, page *websource.FolderPage) {
-	ui.Scroll(c.Key("dirs")).Grow(1).MinHeight(0).Radius(10).Border(1, p.hairline).Children(func() {
+	ui.Scroll(c.Key("dirs")).Grow(1).MinHeight(0).Radius(12).Border(1, p.hairline).Children(func() {
 		for _, d := range page.Dirs {
 			ui.Row(c.Key(d.Path)).Padding(2, 6).Gap(6).AlignItems(ui.Center).Children(func() {
-				b := ui.ButtonBase(c.Key("open")).Grow(1).Height(42).PaddingX(8).Gap(10).Radius(8).AlignItems(ui.Center).Justify(ui.Start).FocusRing(false).Label(d.Name)
+				b := ui.ButtonBase(c.Key("open")).Grow(1).Height(44).PaddingX(10).Gap(10).Radius(8).AlignItems(ui.Center).Justify(ui.Start).FocusRing(false).Label(d.Name)
 				if b.Hovered() {
 					b.Background(p.hover)
 				}
@@ -212,7 +175,7 @@ func (a *app) folderDirs(c *ui.Context, p palette, page *websource.FolderPage) {
 						ui.Text(c, "↗").FontSize(11).TextColor(p.faint)
 					}
 					if d.Added {
-						ui.Text(c, T("Added")).FontSize(11.5).TextColor(p.muted)
+						ui.Icon(c, iconCheck).Size(13, 13).TextColor(p.accent)
 					}
 					ui.Icon(c, iconForward).Size(13, 13).TextColor(p.faint)
 				})
@@ -222,9 +185,39 @@ func (a *app) folderDirs(c *ui.Context, p palette, page *websource.FolderPage) {
 			})
 		}
 		if len(page.Dirs) == 0 {
-			ui.Box(c).Height(80).Center().Children(func() {
+			ui.Box(c).Height(96).Center().Gap(6).Children(func() {
 				ui.Text(c, T("This folder has no subfolders.")).FontSize(12.5).TextColor(p.muted)
+				ui.Text(c, T("You can add this folder.")).FontSize(11.5).TextColor(p.faint)
 			})
+		}
+	})
+}
+
+// folderFooter adds the folder the picker has opened on, as the Open button
+// of a folder chooser chooses the folder it shows; Done closes it, and the
+// listener may add more meanwhile. Folders chosen are taken away in the
+// settings, where they are listed.
+func (a *app) folderFooter(c *ui.Context, p palette, page *websource.FolderPage) {
+	f := &a.folders
+	ui.Row(c.Key("footer")).Gap(12).AlignItems(ui.Center).Children(func() {
+		if ui.Button(c.Key("done"), T("Done")).Clicked() {
+			f.open = false
+		}
+		ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Gap(1).Children(func() {
+			ui.Text(c, T("Folder to add")).FontSize(10.5).TextColor(p.faint)
+			name := page.Path
+			if page.AtRoot {
+				name = T("The whole netdisk")
+			}
+			ui.Text(c, name).FontSize(11.5).TextColor(p.muted).SingleLine()
+		})
+		if page.Added {
+			ui.Row(c.Key("added")).Gap(5).Height(32).PaddingX(6).AlignItems(ui.Center).Children(func() {
+				ui.Icon(c, iconCheck).Size(14, 14).TextColor(p.accent)
+				ui.Text(c, T("Added")).FontSize(12.5).TextColor(p.muted)
+			})
+		} else if pillButton(c.Key("add"), iconPlus, T("Add This Folder"), p.accent, p.onAccent).Clicked() {
+			a.pickFolder(true, page.Path)
 		}
 	})
 }

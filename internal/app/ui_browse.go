@@ -189,38 +189,58 @@ func (a *app) browseRows(c *ui.Context, page *music.Browse, pageID string, heade
 	a.underTop, a.underBottom = true, true
 	rows := len(layout) + 1
 	now := c.Now()
-	ui.List(c.Key(a.route), &a.trackList, rows, func(i int) {
-		if i == 0 {
-			ui.Column(c).PaddingX(12).Children(func() {
-				a.startMark(c)
-				header(c)
-			})
-			return
-		}
-		if i == rows-1 {
-			defer a.endMark(c)
-		}
-		r := layout[i-1]
-		sec := &page.Sections[r.section]
-		switch r.kind {
-		case rowFeature:
-			// What else its section has follows it untitled, as the card has
-			// the title, so the card keeps it off as rows of cards keep apart.
-			below := float32(0)
-			if i < len(layout) && layout[i].section == r.section {
-				below = cardRowGap
+	ui.Box(c.Key("rows")).Grow(1).Children(func() {
+		ui.List(c.Key(a.route), &a.trackList, rows, func(i int) {
+			if i == 0 {
+				ui.Column(c).PaddingX(12).Children(func() {
+					a.startMark(c)
+					header(c)
+				})
+				return
 			}
-			ui.Box(c).Padding(0, 12, below, 12).Children(func() { a.featureCard(c, sec, pageID, r.section, now) })
-		case rowTitle:
-			a.browseTitle(c, sec, r.section == 0)
-		case rowTrack:
-			a.trackRow(c, sec.Tracks, r.from, true, "")
-		case rowEmpty:
-			ui.Column(c).Margin(0, 12, cardRowGap, 12).Children(func() { a.empty(c, sec.Empty) })
-		default:
-			a.cardRow(c, sec, r, cols)
+			if i == rows-1 {
+				defer a.endMark(c)
+			}
+			r := layout[i-1]
+			sec := &page.Sections[r.section]
+			switch r.kind {
+			case rowFeature:
+				// What else its section has follows it untitled, as the card has
+				// the title, so the card keeps it off as rows of cards keep apart.
+				below := float32(0)
+				if i < len(layout) && layout[i].section == r.section {
+					below = cardRowGap
+				}
+				ui.Box(c).Padding(0, 12, below, 12).Children(func() { a.featureCard(c, sec, pageID, r.section, now) })
+			case rowTitle:
+				a.browseTitle(c, sec, r.section == 0)
+			case rowTrack:
+				a.trackRow(c, sec.Tracks, r.from, true, "")
+			case rowEmpty:
+				ui.Column(c).Margin(0, 12, cardRowGap, 12).Children(func() { a.empty(c, sec.Empty) })
+			default:
+				a.cardRow(c, sec, r, cols)
+			}
+		}).Grow(1).Padding(top+pageGap, a.pagePadding(c)-12, bottom+32, a.pagePadding(c)-12).ScrollbarInsets(top, 0, bottom, 0)
+		if at := browsePlayingRow(a.pl.Current(), page, layout); at >= 0 {
+			a.locateButton(c, at+1, bottom)
 		}
-	}).Grow(1).Padding(top+pageGap, a.pagePadding(c)-12, bottom+32, a.pagePadding(c)-12).ScrollbarInsets(top, 0, bottom, 0)
+	})
+}
+
+// browsePlayingRow returns the row of layout that lists the track playing, or
+// -1. The card that leads Home shows tracks among others, which aren't rows
+// the list can go to.
+func browsePlayingRow(cur *music.Track, page *music.Browse, layout []browseRow) int {
+	if cur == nil {
+		return -1
+	}
+	for i, r := range layout {
+		if r.kind == rowTrack && sameTrack(cur, &page.Sections[r.section].Tracks[r.from]) {
+			return i
+		}
+	}
+	return -1
 }
 
 // browseTitle is a section's title, with a way to all of it if there's more.

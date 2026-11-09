@@ -639,6 +639,9 @@ func (a *app) webSettings(c *ui.Context, lib *library, w *websource.Source, row 
 			ui.Row(c.Key(dir)).Padding(8, 16).Gap(10).AlignItems(ui.Center).Children(func() {
 				ui.Icon(c, iconFolder).Size(15, 15).TextColor(p.muted)
 				ui.Text(c, dir).FontSize(12.5).SingleLine().Grow(1).Shrink(1).MinWidth(0)
+				if ui.Button(c.Key("remove"), T("Remove")).Clicked() {
+					a.removeWebFolder(lib, w, dir)
+				}
 			})
 		})
 	}
@@ -646,6 +649,18 @@ func (a *app) webSettings(c *ui.Context, lib *library, w *websource.Source, row 
 		ui.Text(c, T("The player reads the folders you choose on the netdisk, without copying them.")).
 			FontSize(12).TextColor(p.muted).LineHeight(1.45)
 	})
+}
+
+// removeWebFolder stops the library reading a folder of the netdisk, which the
+// settings list and take away: the picker adds folders, and goes on browsing.
+func (a *app) removeWebFolder(lib *library, w *websource.Source, dir string) {
+	go func() {
+		if err := w.RemoveFolder(dir); err != nil {
+			a.post(func() { a.actionFailed(lib, err, T("Couldn't remove the folder")) })
+			return
+		}
+		a.post(func() { a.loadFolders(a.library) })
+	}()
 }
 
 // revealFolder shows a folder in the file manager, making it if need be;

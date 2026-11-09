@@ -368,6 +368,9 @@ func Run() error {
 		// made, and the view asks the player what plays.
 		a.art = newArtCache(a.post)
 		a.pl = player.New(a.post)
+		// The mode button has three modes, all of which repeat: a player new
+		// to a session repeats the queue, rather than stopping at its end.
+		a.pl.SetRepeat(player.RepeatAll)
 		a.pl.Quiet = func(fn func()) { mygo.RunOnMain(fn) }
 		a.pl.Source = a.sourceByID
 		a.pl.Failed = a.sourceFailed

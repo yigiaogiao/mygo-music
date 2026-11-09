@@ -94,6 +94,20 @@ func TestRestoreSessionReattachesRadio(t *testing.T) {
 	}
 }
 
+// A session saved by the four-mode button may say the queue stops at its end:
+// it comes back on the mode button's repeat-all, the first of its three modes.
+func TestRestoreSessionKeepsRepeating(t *testing.T) {
+	tr := song("1", "一")
+	tr.Source = "fake"
+	keptSession(t, player.Session{Queue: []music.Track{tr}, Order: []int{0}, At: 0, Repeat: player.RepeatOff})
+
+	a := newTestApp()
+	a.restoreSession()
+	if got := a.pl.Repeat(); got != player.RepeatAll {
+		t.Errorf("repeat %v, want RepeatAll", got)
+	}
+}
+
 // A session whose radio's source went away picks up its songs without a crash,
 // the radio adding nothing more.
 func TestRestoreSessionOfGoneSource(t *testing.T) {

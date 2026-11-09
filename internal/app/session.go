@@ -89,6 +89,11 @@ func (a *app) restoreSession() {
 	}
 	a.savedSession = string(b)
 	a.pl.Restore(s)
+	// The mode button has three modes, all of which repeat: a session saved
+	// by the four-mode button may say it stops at the end of the queue.
+	if a.pl.Repeat() == player.RepeatOff {
+		a.pl.SetRepeat(player.RepeatAll)
+	}
 	if s.Radio != "" && a.pl.Current() != nil {
 		a.pl.AttachRadio(s.Radio, a.radioFeed(s.Radio))
 	}

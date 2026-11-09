@@ -378,7 +378,7 @@ func (a *app) wallBar(c *ui.Context, accent ui.Color) {
 			ui.Row(c).Grow(1).Basis(0).MinWidth(0).Children(func() {
 				ui.Text(c, clock(pl.Position())).FontSize(11.5).FontFeatures("tnum").TextColor(white.Alpha(0.5))
 			})
-			a.transport(c, white, white.Alpha(0.45), white, 22)
+			a.transport(c, white, white, 22)
 			ui.Row(c).Grow(1).Basis(0).MinWidth(0).Justify(ui.End).Children(func() {
 				ui.Text(c, "-"+clock(pl.Duration()-pl.Position())).FontSize(11.5).FontFeatures("tnum").TextColor(white.Alpha(0.5))
 			})
