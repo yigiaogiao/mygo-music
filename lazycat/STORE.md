@@ -61,8 +61,9 @@ cd ~/orca/projects/mygo-music
 | 简介（brief） | 由 LPK 带出，网页上不可编辑 |
 | 描述（description） | 见下方「描述文案」 |
 | 关键词 | `音乐,播放器,网盘,本地音乐,歌词,无损,music,player,lyrics` |
-| 来源（source） | `https://github.com/yigiaogiao/mygo-music` |
-| 作者（source_author） | `yigiaogiao` |
+| 原创开发 / 本人是源作者 | **不要勾**：MyGo 的原作者是 egoist，这是适配懒猫的修改版 |
+| 源作者或组织 | `egoist` |
+| 来源（source） | `https://github.com/egoist/mygo-music`（原项目仓库） |
 | 支持平台 | 桌面端 ✓、移动端 ✓（两个都勾） |
 | 图标 | 上传 `lazycat/icon.png` |
 | 桌面截图 | 上传 `lazycat/store/screenshots/pc/` 里的 4 张 |
@@ -91,6 +92,9 @@ MyGo 音乐播放懒猫网盘里的音乐，不会复制或改动你的文件。
 - 歌单、喜欢和扫描缓存保存在微服本地，重启和升级不丢失
 
 第一次打开时点「设置 → 音乐来源 → 选择文件夹」，在网盘里选中放音乐的目录即可。
+
+本应用基于 egoist 的 MyGo Music（AGPL-3.0）修改并适配懒猫微服，修改版源码：
+https://github.com/yigiaogiao/mygo-music
 ```
 
 English：
@@ -105,7 +109,17 @@ MyGo Music plays the music in your LazyCat netdisk without copying or changing y
 - Playlists, favorites and the scan cache stay on your microserver across restarts and upgrades
 
 On first launch, open Settings → Music Sources → Choose Folders and pick the folder that holds your music.
+
+This app is based on MyGo Music by egoist (AGPL-3.0), modified for LazyCat. Modified source:
+https://github.com/yigiaogiao/mygo-music
 ```
+
+### 关于「原创开发」勾选框
+
+勾上表示「原创开发或本人是源作者」，同时会清空来源和源作者两个字段。MyGo 的
+原作者是 egoist，这个包是在其 AGPL-3.0 代码上做的懒猫适配，**不能勾**。不勾时
+网页会要求填写「源作者或组织名称」和「移植项目主页或代码仓库地址」，按上表填
+`egoist` 和原仓库地址即可；修改版源码放在描述里，满足 AGPL 的源码可得要求。
 
 ## 第 3 步（可选）：先走内测
 
