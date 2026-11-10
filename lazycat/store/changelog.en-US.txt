@@ -1,0 +1,7 @@
+First release on the LazyCat app store.
+
+- Play the music in your LazyCat netdisk: MP3, FLAC, AAC, M4A, OGG and WAV
+- Reads a song's .lrc file when there is one; songs without lyrics find them at LRCLib
+- Browse by song, album and artist, with playlists, favorites and search
+- Works on desktop and mobile, with a layout made for narrow screens
+- Playlists, favorites and the scan cache stay on your microserver across restarts and upgrades
