@@ -108,9 +108,22 @@ func playPause(c *ui.Context, b ui.Element, playing bool, size float32) {
 	})
 }
 
+// touchIconPad is how far an icon button reaches beyond its size on a
+// phone, where a finger is blunter than a pointer: the button keeps its
+// place, growing into the room around it.
+const touchIconPad = 5
+
 // roundButton is the button of iconButton, without its icon.
 func roundButton(c *ui.Context, size float32, color ui.Color, label string) ui.Element {
-	b := ui.ButtonBase(c).Size(size+16, size+16).Center().Radius(999).Label(label).TextColor(color)
+	side := size + 16
+	b := ui.ButtonBase(c).Center().Radius(999).Label(label).TextColor(color)
+	if w, _ := c.Size(); w < mobileBreakpoint {
+		// The extra room shows nothing, so only a finger's aim, and the
+		// margin takes it back out of the layout.
+		side += 2 * touchIconPad
+		b.Margin(-touchIconPad)
+	}
+	b.Size(side, side)
 	bg := ui.Transparent
 	if b.Hovered() {
 		bg = ui.RGBA(128, 128, 128, 0.14)

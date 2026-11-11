@@ -1,0 +1,1767 @@
+// Package f32 provides SIMD-accelerated operations on float32 slices.
+//
+// All functions automatically select the optimal implementation based on
+// runtime CPU feature detection. Functions gracefully fall back to pure Go
+// implementations on unsupported architectures.
+//
+// Thread Safety: All functions are safe for concurrent use.
+// Memory: All functions are zero-allocation (no heap allocations).
+//
+// Rounding and fusion: each floating-point operation is a single IEEE-754
+// rounded instruction. The elementwise scale, offset, clamp and float-to-fixed
+// conversion primitives (for example [Scale], [AddScalar], [Affine], [ClampScale],
+// [Float32ToInt32ScaleClamp], [Float32ToInt32ScaleClampSigned] and the
+// Int*ToFloat32Scale family) never contract a
+// multiply and a following add into a fused multiply-add: a consumer that
+// reproduces a scalar reference bit-for-bit depends on the product rounding to
+// float32 before the add. Where fusion is wanted, use [FMA], the AXPY
+// [AddScaled], or the multiply-accumulate [MulAdd], whose names say so.
+// Reductions and math functions such as
+// [DotProduct] and the exp/log family do use FMA, where a single fused rounding
+// is correct and no such reference exists. The no-fuse contract is
+// asmcheck-enforced for the primitives that actually perform a multiply followed
+// by an add (see TestNoFMAContract in the module root); a future optimization
+// that fuses one of them fails that test rather than silently changing bits.
+//
+// # Aliasing
+//
+// The element-wise maps may be used fully in place: the destination may alias an
+// input exactly, element for element. This holds for the unary maps (Abs, Neg,
+// Round, Sqrt, Reciprocal, Exp, Log, Log2, Log10, Log10Floored, ReLU, Sigmoid,
+// Tanh, AbsPow34, Scale, AddScalar, Affine, SubFromScalar, Clamp, ClampScale,
+// Pow), for the two-pass
+// CumulativeSum and Normalize (dst==a), for the binary maps (Add, Sub, Mul, Div,
+// PowElem, CopySign, AbsSqComplex, where dst may alias any input, or all of them
+// at once), for the fused multiply-add FMA (dst may alias a, b or c), and for the
+// split-complex products MulComplex and MulConjComplex, whose result may
+// overwrite either input vector (dstRe==aRe with dstIm==aIm, or dstRe==bRe with
+// dstIm==bIm). The guarantee is mechanical: each SIMD block reads its whole block
+// of inputs into registers before storing any output lane, and the scalar tail
+// reads each lane before it writes that lane, so an exact overlay is well defined
+// lane by lane on every dispatch path (amd64 SSE, AVX and AVX-512, arm64 NEON, and
+// the pure-Go fallback).
+//
+// A destination must not overlap an input at a shifted offset. A SIMD load pulls
+// a whole block of an input ahead of the stores, so a shifted overlay clobbers
+// input lanes a later iteration has not yet read; the resulting corruption
+// pattern is undefined and varies with kernel width and length.
+//
+// The departures from this default are documented on the functions themselves:
+//   - Reverse reverses in place when dst==src; it must not otherwise overlap src.
+//   - MulComplex and MulConjComplex write two outputs that must be distinct:
+//     dstRe and dstIm may not overlap each other.
+//   - AddSub writes two outputs and supports no output-over-input overlay at all;
+//     pass sumDst and diffDst distinct from a, b and each other.
+//   - AddScaled and AccumulateAdd read and rewrite dst in place (they are
+//     accumulators); their source slice must be disjoint from the destination
+//     window, except that AddScaled also permits s==dst exactly.
+//   - ButterflyComplex, ButterflyComplexStage and ButterflyComplexStage4 update
+//     their data slices in place; those slices must not overlap one another, and
+//     the twiddles must not overlap them.
+//   - The mirror, window, stride, interleave, batch and resample operations
+//     (Interleave2/N, Deinterleave2/N, ConvolveValid and ConvolveValidMulti,
+//     ConvolveDecimate, DotProductBatch, DotProductIndexed, DotProductStrided,
+//     MinIdxOfSumRows and RealFFTUnpack) index inputs and
+//     outputs at different positions, so their outputs must not overlap any input.
+//
+// The float-to-fixed and fixed-to-float conversions (Float32ToInt16Scale,
+// Float32ToInt32ScaleClamp and its Signed form, Int16ToFloat32Scale,
+// Int32ToFloat32Scale) have distinct input and output element types and so cannot
+// alias in safe Go. The reductions (DotProduct, WeightedSum, SumOfSquares, Sum,
+// Mean, Max, Min, MaxAbs, MaxIdx, MinIdx, MinIdxOfSum, Variance, StdDev,
+// EuclideanDistance, ConvolveValidMaxAbs and ConvolveValidMaxAbsMulti,
+// CubicInterpDot) write no output slice, so aliasing does not apply to them. The
+// in-place transcendental variants (ExpInPlace, LogInPlace, PowInPlace,
+// ReLUInPlace, SigmoidInPlace, TanhInPlace) operate on a single slice, so
+// aliasing does not arise, and the Unsafe variants follow the aliasing rules of
+// the checked form they mirror.
+package f32
+
+import "math"
+
+// DotProduct computes the dot product of two float32 slices.
+// Returns sum(a[i] * b[i]) for i in 0..min(len(a), len(b)).
+//
+// Uses AVX+FMA on AMD64 (8x float32), NEON on ARM64 (4x float32).
+func DotProduct(a, b []float32) float32 {
+	if len(a) == 0 || len(b) == 0 {
+		return 0
+	}
+	return dotProduct(a, b)
+}
+
+// DotProductUnsafe computes the dot product without empty-slice checks.
+// It skips the len==0 guard in [DotProduct] but is otherwise identical:
+// the underlying SIMD kernels and Go fallback clamp to min(len(a), len(b)) internally,
+// so mismatched lengths do not cause out-of-bounds access.
+//
+// PRECONDITIONS (caller must ensure):
+//   - len(a) > 0 && len(b) > 0
+func DotProductUnsafe(a, b []float32) float32 {
+	return dotProduct(a, b)
+}
+
+// WeightedSum returns the weighted sum Σ(weights[i]·src[i]).
+//
+// This is mathematically a dot product, so it reuses the dispatched dot-product
+// kernel (AVX+FMA on AMD64, NEON on ARM64). Processes min(len(weights), len(src))
+// elements; returns 0 if either slice is empty.
+func WeightedSum(weights, src []float32) float32 {
+	if len(weights) == 0 || len(src) == 0 {
+		return 0
+	}
+	return dotProduct(weights, src)
+}
+
+// SumOfSquares returns Σ(src[i]²), computed as the dot product of src with
+// itself so it shares the dispatched dot-product kernel. Returns 0 for an empty
+// slice.
+func SumOfSquares(src []float32) float32 {
+	if len(src) == 0 {
+		return 0
+	}
+	return dotProduct(src, src)
+}
+
+// Add computes element-wise addition: dst[i] = a[i] + b[i].
+func Add(dst, a, b []float32) {
+	n := minLen(len(dst), len(a), len(b))
+	if n == 0 {
+		return
+	}
+	add(dst[:n], a[:n], b[:n])
+}
+
+// Sub computes element-wise subtraction: dst[i] = a[i] - b[i].
+func Sub(dst, a, b []float32) {
+	n := minLen(len(dst), len(a), len(b))
+	if n == 0 {
+		return
+	}
+	sub(dst[:n], a[:n], b[:n])
+}
+
+// Mul computes element-wise multiplication: dst[i] = a[i] * b[i].
+func Mul(dst, a, b []float32) {
+	n := minLen(len(dst), len(a), len(b))
+	if n == 0 {
+		return
+	}
+	mul(dst[:n], a[:n], b[:n])
+}
+
+// Div computes element-wise division: dst[i] = a[i] / b[i].
+func Div(dst, a, b []float32) {
+	n := minLen(len(dst), len(a), len(b))
+	if n == 0 {
+		return
+	}
+	div(dst[:n], a[:n], b[:n])
+}
+
+// Scale multiplies each element by a scalar: dst[i] = a[i] * s.
+func Scale(dst, a []float32, s float32) {
+	n := min(len(a), len(dst))
+	if n == 0 {
+		return
+	}
+	scale(dst[:n], a[:n], s)
+}
+
+// AddScalar adds a scalar to each element: dst[i] = a[i] + s.
+func AddScalar(dst, a []float32, s float32) {
+	n := min(len(a), len(dst))
+	if n == 0 {
+		return
+	}
+	addScalar(dst[:n], a[:n], s)
+}
+
+// Affine computes the scalar-affine map dst[i] = alpha*src[i] + beta for every
+// element: the fused form of Scale (alpha*x) followed by AddScalar
+// (x + beta).
+//
+// The multiply and the add round separately (two IEEE-754 roundings), so the
+// result is bit-identical to Scale(dst, src, alpha) then AddScalar(dst, dst, beta)
+// on every dispatch path; the kernels never contract into a fused multiply-add
+// (asmcheck-enforced, see TestNoFMAContract). Where a single fused rounding is
+// wanted instead, use FMA.
+//
+// In-place safe (dst may alias src). Processes min(len(dst), len(src)) elements.
+func Affine(dst, src []float32, alpha, beta float32) {
+	n := min(len(dst), len(src))
+	if n == 0 {
+		return
+	}
+	affine32(dst[:n], src[:n], alpha, beta)
+}
+
+// SubFromScalar computes dst[i] = s - a[i] (scalar minus vector).
+//
+// Composed from already-dispatched primitives ((s - a) == (-a) + s), so it is
+// vectorized on every supported CPU and falls back to pure Go otherwise.
+// Processes min(len(a), len(dst)) elements.
+func SubFromScalar(dst, a []float32, s float32) {
+	n := min(len(a), len(dst))
+	if n == 0 {
+		return
+	}
+	subFromScalar32(dst[:n], a[:n], s)
+}
+
+// Sum returns the sum of all elements.
+func Sum(a []float32) float32 {
+	if len(a) == 0 {
+		return 0
+	}
+	return sum(a)
+}
+
+// Min returns the minimum value in the slice.
+// Returns +Inf for empty slices.
+//
+// NaN handling: unlike [math.Min], this function does not propagate NaN.
+// If the input contains NaN values, the result is architecture-dependent.
+// Callers that require strict NaN semantics should filter NaN values first.
+func Min(a []float32) float32 {
+	if len(a) == 0 {
+		return posInf
+	}
+	return min32(a)
+}
+
+// Max returns the maximum value in the slice.
+// Returns -Inf for empty slices.
+//
+// NaN handling: unlike [math.Max], this function does not propagate NaN.
+// If the input contains NaN values, the result is architecture-dependent.
+// Callers that require strict NaN semantics should filter NaN values first.
+func Max(a []float32) float32 {
+	if len(a) == 0 {
+		return negInf
+	}
+	return max32(a)
+}
+
+// MaxAbs returns the maximum absolute value in the slice (the infinity norm),
+// max_i |a[i]|. Returns 0 for an empty slice.
+//
+// Uses AVX2/SSE on AMD64 (AVX-512 CPUs reuse the AVX2 kernel), NEON on ARM64,
+// with a pure Go fallback. a is read-only; the call allocates nothing.
+//
+// NaN handling: |NaN| is NaN and compares false, so the Go path skips NaN. On the
+// SIMD paths NaN handling is architecture-dependent, matching [Min] and [Max].
+// Callers needing strict NaN semantics should filter NaN first.
+func MaxAbs(a []float32) float32 {
+	if len(a) == 0 {
+		return 0
+	}
+	return maxAbs32(a)
+}
+
+// Abs computes element-wise absolute value: dst[i] = |a[i]|.
+func Abs(dst, a []float32) {
+	n := min(len(a), len(dst))
+	if n == 0 {
+		return
+	}
+	abs32(dst[:n], a[:n])
+}
+
+// Neg computes element-wise negation: dst[i] = -a[i].
+func Neg(dst, a []float32) {
+	n := min(len(a), len(dst))
+	if n == 0 {
+		return
+	}
+	neg32(dst[:n], a[:n])
+}
+
+// CopySign composes each result from the magnitude of mag[i] and the sign of
+// sign[i]: dst[i] = |mag[i]| carrying sign[i]'s sign bit. It is exactly IEEE-754
+// copysign applied elementwise,
+//
+//	dst[i] = Float32frombits((Float32bits(mag[i]) &^ 0x80000000) | (Float32bits(sign[i]) & 0x80000000))
+//
+// which equals math.Copysign(mag[i], sign[i]) elementwise, and is bit-for-bit
+// identical to it for every non-NaN input. Processes
+// min(len(dst), len(mag), len(sign)) elements.
+//
+// The predicate is the IEEE sign bit (bit 31), not arithmetic comparison, so a
+// sign of -0.0 yields a negative result and a sign of +0.0 a positive one
+// (matching math.Copysign). NaN and Inf magnitudes keep their bits and take
+// sign[i]'s sign; CopySign preserves the input float32 NaN payload exactly, which
+// a float64 round trip through math.Copysign does not guarantee.
+//
+// The operation is pure bit manipulation with no rounding, so it is exact and
+// bit-identical across amd64 (VANDPS/VORPS), arm64 (BIT), and the pure-Go
+// fallback: there is no relaxed tier. dst may alias mag and/or sign, since each
+// output depends only on its own index; CopySign(x, x, x) is a valid in-place
+// abs-with-own-sign (an identity). It allocates nothing.
+func CopySign(dst, mag, sign []float32) {
+	n := minLen(len(dst), len(mag), len(sign))
+	if n == 0 {
+		return
+	}
+	copySign32(dst[:n], mag[:n], sign[:n])
+}
+
+// FMA computes fused multiply-add: dst[i] = a[i] * b[i] + c[i].
+func FMA(dst, a, b, c []float32) {
+	n := min(len(c), minLen(len(dst), len(a), len(b)))
+	if n == 0 {
+		return
+	}
+	fma32(dst[:n], a[:n], b[:n], c[:n])
+}
+
+// MulAdd computes the fused multiply-accumulate dst[i] += a[i] * b[i].
+//
+// It is equivalent to FMA(dst, a, b, dst) and shares FMA's numerical contract:
+// on CPU tiers with hardware FMA (AVX+FMA, AVX-512, NEON) the multiply-add is
+// fused with a single rounding; on the SSE2 path and the pure-Go fallback it is
+// a separate multiply then add. Results are therefore tolerance-stable across
+// tiers, not bit-identical.
+//
+// dst is a read-modify-write accumulator. Following the package default, dst may
+// exactly overlay a and/or b; a shifted overlay is undefined.
+func MulAdd(dst, a, b []float32) {
+	n := minLen(len(dst), len(a), len(b))
+	if n == 0 {
+		return
+	}
+	fma32(dst[:n], a[:n], b[:n], dst[:n])
+}
+
+// Clamp clamps each element to [min, max].
+func Clamp(dst, a []float32, minVal, maxVal float32) {
+	n := min(len(a), len(dst))
+	if n == 0 {
+		return
+	}
+	clamp32(dst[:n], a[:n], minVal, maxVal)
+}
+
+func minLen(a, b, c int) int {
+	if b < a {
+		a = b
+	}
+	if c < a {
+		a = c
+	}
+	return a
+}
+
+// DotProductBatch computes multiple dot products against the same vector.
+// results[i] = DotProduct(rows[i], vec) for each row.
+// This is more cache-efficient than calling DotProduct in a loop because
+// vec stays hot in L1 cache across all dot products.
+//
+// Processes min(len(results), len(rows)) rows.
+// Each row is processed up to min(len(row), len(vec)) elements.
+// An empty vec (or an empty row) yields the empty-vector dot product, 0, so
+// results[:n] is zeroed rather than left with stale values (see #303, matching
+// the i8, f16 and f64 packages).
+func DotProductBatch(results []float32, rows [][]float32, vec []float32) {
+	n := min(len(results), len(rows))
+	if n == 0 {
+		return
+	}
+	dotProductBatch32(results[:n], rows[:n], vec)
+}
+
+// DotProductIndexed computes dot products between query and selected rows in a
+// flat row-major base slice. For each processed row i:
+//
+//	dst[i] = dot(base[rowIDs[i]*dims : rowIDs[i]*dims+dims], query[:dims])
+//
+// The number of processed rows is min(len(dst), len(rowIDs)). Ragged inputs are
+// safe: if query is shorter than dims or a row extends past base, the dot uses
+// the available common prefix; out-of-range row IDs, non-positive dims, or an
+// empty query produce a zero score for that row. The function returns true when
+// at least one optimized platform SIMD batch kernel was used; false means the
+// per-row fallback handled the call.
+func DotProductIndexed(dst, base, query []float32, rowIDs []uint32, dims int) bool {
+	n := min(len(dst), len(rowIDs))
+	if n == 0 {
+		return false
+	}
+	return dotProductIndexed(dst[:n], base, query, rowIDs[:n], dims)
+}
+
+// DotProductStrided computes dot products between query and rowCount rows in a
+// flat base slice where row i starts at base[i*stride]. dims and stride are in
+// float32 elements, not bytes; use stride >= dims for non-overlapping rows.
+// The number of processed rows is
+// min(len(dst), rowCount). Ragged inputs are safe: if query is shorter than dims
+// or a row extends past base, the dot uses the available common prefix;
+// non-positive rowCount/dims/stride or an empty query produce zero scores for
+// processed rows. The function returns true when at least one optimized platform
+// SIMD batch kernel was used; false means the per-row fallback handled the call.
+func DotProductStrided(dst, base, query []float32, rowCount, dims, stride int) bool {
+	if rowCount <= 0 || len(dst) == 0 {
+		return false
+	}
+	n := min(len(dst), rowCount)
+	return dotProductStrided(dst[:n], base, query, n, dims, stride)
+}
+
+// ConvolveValid computes valid convolution of signal with kernel.
+// dst[i] = sum(signal[i+j] * kernel[j]) for j in 0..len(kernel)-1.
+// Output length is len(signal) - len(kernel) + 1.
+//
+// This is equivalent to applying a FIR filter without zero-padding.
+func ConvolveValid(dst, signal, kernel []float32) {
+	if len(kernel) == 0 || len(signal) < len(kernel) {
+		return
+	}
+	validLen := len(signal) - len(kernel) + 1
+	n := min(len(dst), validLen)
+	if n == 0 {
+		return
+	}
+	convolveValid32(dst[:n], signal, kernel)
+}
+
+// ConvolveDecimate computes a decimating (strided) valid convolution: it keeps
+// only every factor-th valid-convolution output, starting at phase.
+//
+//	dst[k] = sum_{i=0}^{len(kernel)-1} signal[phase + k*factor + i] * kernel[i]
+//
+// The kernel is applied as a plain dot product; pre-reverse it for true
+// convolution (matching DotProductUnsafe and ConvolveValid usage). factor must
+// be >= 1 (factor == 1 is valid convolution at every position) and phase must be
+// in [0, factor); factor < 1, phase < 0, or phase >= factor are treated as
+// no-ops. With factor == 1 and phase == 0 this is exactly ConvolveValid.
+//
+// The number of outputs is the count of strided positions whose full kernel
+// window fits in signal; ConvolveDecimate writes min(len(dst), that count) and
+// leaves the remainder of dst untouched. It allocates nothing and operates on
+// the caller-provided buffers.
+func ConvolveDecimate(dst, signal, kernel []float32, factor, phase int) {
+	kLen := len(kernel)
+	if kLen == 0 || factor < 1 || phase < 0 || phase >= factor {
+		return
+	}
+	span := len(signal) - kLen - phase
+	if span < 0 {
+		return
+	}
+	n := min(len(dst), span/factor+1)
+	if n == 0 {
+		return
+	}
+	convolveDecimate32(dst[:n], signal, kernel, factor, phase)
+}
+
+// AccumulateAdd adds src to dst starting at offset: dst[offset:offset+len(src)] += src.
+// This is a key primitive for overlap-add in FFT-based convolution.
+//
+// The destination window dst[offset:offset+len(src)] is a read-modify-write
+// accumulator; src must not overlap that window. An overlap-add caller passes a
+// src region disjoint from the destination window, so this is the natural usage.
+//
+// Panics if offset+len(src) > len(dst) or if offset < 0.
+func AccumulateAdd(dst, src []float32, offset int) {
+	if offset < 0 {
+		panic("simd: negative offset")
+	}
+	n := len(src)
+	if n == 0 {
+		return
+	}
+	if offset+n > len(dst) {
+		panic("simd: offset+len(src) exceeds len(dst)")
+	}
+	accumulateAdd32(dst[offset:offset+n], src)
+}
+
+var (
+	posInf = float32(math.Inf(1))
+	negInf = float32(math.Inf(-1))
+)
+
+// Interleave2 interleaves two slices: dst[0]=a[0], dst[1]=b[0], dst[2]=a[1], dst[3]=b[1], ...
+// Processes min(len(a), len(b), len(dst)/2) pairs.
+// This is useful for converting separate channels to interleaved stereo audio.
+func Interleave2(dst, a, b []float32) {
+	n := min(len(dst)/interleave2Channels, min(len(a), len(b)))
+	if n == 0 {
+		return
+	}
+	interleave2_32(dst[:n*interleave2Channels], a[:n], b[:n])
+}
+
+// Deinterleave2 deinterleaves a slice: a[0]=src[0], b[0]=src[1], a[1]=src[2], b[1]=src[3], ...
+// Processes min(len(a), len(b), len(src)/2) pairs.
+// This is the inverse of Interleave2, useful for splitting stereo audio to channels.
+func Deinterleave2(a, b, src []float32) {
+	n := min(len(src)/interleave2Channels, min(len(a), len(b)))
+	if n == 0 {
+		return
+	}
+	deinterleave2_32(a[:n], b[:n], src[:n*interleave2Channels])
+}
+
+const interleave2Channels = 2
+
+// InterleaveN interleaves N planar streams into a single interleaved buffer:
+//
+//	dst[i*N + c] = srcs[c][i],   N = len(srcs)
+//
+// It is the N-stream generalization of Interleave2. N == 1 copies srcs[0] into
+// dst; N == 2 produces the same result as Interleave2. The number of frames
+// written is min(len(dst)/N, min over c of len(srcs[c])); dst beyond n*N and any
+// ragged source tails are left untouched. An empty srcs is a no-op.
+//
+// This is the planar -> interleaved direction for multichannel audio (for
+// example combining per-phase polyphase outputs into one stream). It allocates
+// nothing and operates on the caller-provided buffers.
+func InterleaveN(dst []float32, srcs [][]float32) {
+	nc := len(srcs)
+	if nc == 0 {
+		return
+	}
+	n := len(dst) / nc
+	for _, s := range srcs {
+		if len(s) < n {
+			n = len(s)
+		}
+	}
+	if n == 0 {
+		return
+	}
+	interleaveN32(dst, srcs, n)
+}
+
+// DeinterleaveN splits one interleaved buffer into N planar streams:
+//
+//	dsts[c][i] = src[i*N + c],   N = len(dsts)
+//
+// It is the inverse of InterleaveN and the N-stream generalization of
+// Deinterleave2. N == 1 copies src into dsts[0]; N == 2 produces the same result
+// as Deinterleave2. The number of frames written is min(len(src)/N, min over c
+// of len(dsts[c])); any ragged destination tails are left untouched. An empty
+// dsts is a no-op. It allocates nothing and operates on the caller-provided
+// buffers.
+func DeinterleaveN(dsts [][]float32, src []float32) {
+	nc := len(dsts)
+	if nc == 0 {
+		return
+	}
+	n := len(src) / nc
+	for _, d := range dsts {
+		if len(d) < n {
+			n = len(d)
+		}
+	}
+	if n == 0 {
+		return
+	}
+	deinterleaveN32(dsts, src, n)
+}
+
+// Sqrt computes element-wise square root: dst[i] = sqrt(a[i]).
+// Processes min(len(dst), len(a)) elements.
+//
+// The result is IEEE-754 correctly-rounded (round-to-nearest, ties to even) on
+// every backend: for each input it returns the float32 nearest the true square
+// root. This holds for VSQRTPS/SQRTPS on amd64 and FSQRT on arm64 (IEEE-754
+// mandates a correctly-rounded sqrt), and for the pure-Go fallback, which
+// computes float32(math.Sqrt(float64(x))). That fallback is a double rounding
+// (the correctly-rounded binary64 sqrt, then narrowed to binary32), yet it is
+// provably identical to the correctly-rounded binary32 sqrt: double rounding
+// through an intermediate format is innocuous for sqrt when the intermediate
+// carries at least 2*p+2 significand bits, and binary64's 53 bits exceed the
+// 2*24+2 = 50 that binary32 (p = 24) requires. All three backends therefore
+// return the same bits, so callers may compose bit-exact higher powers on top of
+// Sqrt (for example [AbsPow34]).
+func Sqrt(dst, a []float32) {
+	n := min(len(dst), len(a))
+	if n == 0 {
+		return
+	}
+	sqrt32(dst[:n], a[:n])
+}
+
+// AbsPow34 computes the element-wise 3/4 power of the magnitude:
+//
+//	dst[i] = |src[i]|^(3/4)
+//
+// evaluated as sqrt(|src[i]| * sqrt(|src[i]|)). Processes min(len(dst), len(src))
+// elements. dst may alias src (each output depends only on the matching input
+// element), so AbsPow34(x, x) computes the transform in place.
+//
+// This is the fused form of the C expression sqrtf(a * sqrtf(a)) with a = |x|,
+// and it is bit-identical to that expression on every backend: abs is exact, the
+// two square roots are IEEE-754 correctly-rounded (see [Sqrt]), and the middle
+// multiply is a single correctly-rounded float32 product. There is no add, so
+// the library's no-FMA contract does not apply. The result is the same bits on
+// VANDPS/VSQRTPS/VMULPS (amd64), FABS/FSQRT/FMUL (arm64), and the pure-Go
+// fallback; there is no relaxed tier.
+//
+// Range behavior is part of the contract, and this is NOT a full-range 3/4
+// power. The intermediate |x| * sqrt(|x|) is computed in float32, so it
+// overflows to +Inf once |x| exceeds about 2^85.33 (for example x = 2^100, whose
+// true |x|^0.75 = 2^75 is representable, still yields +Inf) and underflows to 0
+// for tiny |x| (for example x = 2^-100, true 2^-75, yields 0). This exactly
+// mirrors the C fused form. For an approximate 3/4 power over the whole range
+// without this intermediate saturation, use [Pow] with exp = 0.75. Edge cases:
+// 0 -> 0, +-Inf -> +Inf, NaN -> NaN (the NaN payload bits are not guaranteed
+// identical across backends, matching the rest of f32). It allocates nothing.
+func AbsPow34(dst, src []float32) {
+	n := min(len(dst), len(src))
+	if n == 0 {
+		return
+	}
+	absPow34_32(dst[:n], src[:n])
+}
+
+// Round rounds each element to the nearest integer, half away from zero:
+// dst[i] = round(src[i]). Processes min(len(dst), len(src)) elements.
+func Round(dst, src []float32) {
+	n := min(len(dst), len(src))
+	if n == 0 {
+		return
+	}
+	round32(dst[:n], src[:n])
+}
+
+// Reciprocal computes element-wise reciprocal: dst[i] = 1/a[i].
+// Processes min(len(dst), len(a)) elements.
+func Reciprocal(dst, a []float32) {
+	n := min(len(dst), len(a))
+	if n == 0 {
+		return
+	}
+	reciprocal32(dst[:n], a[:n])
+}
+
+// MinIdx returns the index of the minimum value in the slice.
+// Returns -1 for empty slices.
+//
+// Ties resolve to the lowest index: the first occurrence of the minimum
+// wins. Comparison is strict (<), so NaN values never displace the
+// incumbent; if a[0] is NaN it is never displaced either, and a slice
+// whose values are all NaN returns 0. These properties are contractual
+// and hold on every dispatch path; a future vectorized implementation
+// must preserve them.
+func MinIdx(a []float32) int {
+	if len(a) == 0 {
+		return -1
+	}
+	return minIdx32(a)
+}
+
+// MaxIdx returns the index of the maximum value in the slice.
+// Returns -1 for empty slices.
+//
+// Ties resolve to the lowest index: the first occurrence of the maximum
+// wins. Comparison is strict (>), so NaN values never displace the
+// incumbent; if a[0] is NaN it is never displaced either, and a slice
+// whose values are all NaN returns 0. These properties are contractual
+// and hold on every dispatch path; a future vectorized implementation
+// must preserve them.
+func MaxIdx(a []float32) int {
+	if len(a) == 0 {
+		return -1
+	}
+	return maxIdx32(a)
+}
+
+// AddScaled adds scaled values to dst: dst[i] += alpha * s[i].
+// This is the AXPY operation from BLAS Level 1.
+// Processes min(len(dst), len(s)) elements.
+//
+// dst is a read-modify-write accumulator. s may overlay dst exactly (the
+// self-scaling dst[i] += alpha*dst[i], since each lane is read before it is
+// rewritten), but s must not overlap dst at a shifted offset.
+func AddScaled(dst []float32, alpha float32, s []float32) {
+	n := min(len(dst), len(s))
+	if n == 0 {
+		return
+	}
+	addScaled32(dst[:n], alpha, s[:n])
+}
+
+// CumulativeSum computes the cumulative sum: dst[i] = sum(a[0:i+1]).
+// Processes min(len(dst), len(a)) elements.
+func CumulativeSum(dst, a []float32) {
+	n := min(len(dst), len(a))
+	if n == 0 {
+		return
+	}
+	cumulativeSum32(dst[:n], a[:n])
+}
+
+// Normalize normalizes a vector to unit length: dst = a / ||a||.
+// If the magnitude is zero or very small (< 1e-7), copies the input unchanged.
+// Processes min(len(dst), len(a)) elements.
+func Normalize(dst, a []float32) {
+	n := min(len(dst), len(a))
+	if n == 0 {
+		return
+	}
+
+	// Compute magnitude using dot product with itself
+	mag := float32(math.Sqrt(float64(DotProduct(a[:n], a[:n]))))
+
+	// Avoid division by zero (use float32-appropriate threshold)
+	if mag < normalizeMagnitudeThreshold32 {
+		copy(dst[:n], a[:n])
+		return
+	}
+
+	// Scale by 1/magnitude
+	Scale(dst[:n], a[:n], 1.0/mag)
+}
+
+// Mean computes the arithmetic mean of a slice.
+// Returns 0 for empty slices.
+func Mean(a []float32) float32 {
+	if len(a) == 0 {
+		return 0
+	}
+	return Sum(a) / float32(len(a))
+}
+
+// Variance computes the population variance of a slice.
+// Returns 0 for empty slices.
+func Variance(a []float32) float32 {
+	n := len(a)
+	if n == 0 {
+		return 0
+	}
+	mean := Mean(a)
+	return variance32(a, mean)
+}
+
+// StdDev computes the population standard deviation of a slice.
+// Returns 0 for empty slices.
+func StdDev(a []float32) float32 {
+	return float32(math.Sqrt(float64(Variance(a))))
+}
+
+// EuclideanDistance computes the Euclidean distance between two vectors.
+// Returns sqrt(sum((a[i] - b[i])^2)) for i in 0..min(len(a), len(b)).
+func EuclideanDistance(a, b []float32) float32 {
+	n := min(len(a), len(b))
+	if n == 0 {
+		return 0
+	}
+	return euclideanDistance32(a[:n], b[:n])
+}
+
+const normalizeMagnitudeThreshold32 = 1e-7
+
+// realFFTUnpackMinN is the minimum n required for RealFFTUnpack (need at least 2 bins).
+const realFFTUnpackMinN = 2
+
+// CubicInterpDot computes the fused cubic interpolation dot product:
+//
+//	Σ hist[i] * (a[i] + x*(b[i] + x*(c[i] + x*d[i])))
+//
+// This is the hot inner loop for polyphase resampling with cubic coefficient
+// interpolation. The polynomial a + x*(b + x*(c + x*d)) is evaluated using
+// Horner's method for numerical stability, then multiplied by hist and summed.
+//
+// Parameters:
+//   - hist: history buffer (signal samples)
+//   - a, b, c, d: cubic polynomial coefficient arrays
+//   - x: fractional phase, typically in [0, 1)
+//
+// All slices must have equal length. Returns 0 for empty slices.
+//
+// This fused operation is more efficient than 4 separate DotProduct calls
+// because it reads the hist array only once (37% less memory bandwidth).
+//
+// Uses AVX+FMA on AMD64, NEON on ARM64, with pure Go fallback.
+func CubicInterpDot(hist, a, b, c, d []float32, x float32) float32 {
+	n := minLen5(len(hist), len(a), len(b), len(c), len(d))
+	if n == 0 {
+		return 0
+	}
+	return cubicInterpDot32(hist[:n], a[:n], b[:n], c[:n], d[:n], x)
+}
+
+// CubicInterpDotUnsafe computes the fused cubic interpolation dot product
+// without length validation.
+//
+// PRECONDITIONS (caller must ensure):
+//   - len(hist) == len(a) == len(b) == len(c) == len(d)
+//   - len(hist) > 0
+//
+// Violating these preconditions results in undefined behavior.
+// Use CubicInterpDot for safe operation with automatic length handling.
+func CubicInterpDotUnsafe(hist, a, b, c, d []float32, x float32) float32 {
+	return cubicInterpDot32(hist, a, b, c, d, x)
+}
+
+func minLen5(a, b, c, d, e int) int {
+	return min(a, b, c, d, e)
+}
+
+// ConvolveValidMulti applies multiple kernels to the same signal.
+// dsts[k][i] = sum(signal[i+j] * kernels[k][j]) for each kernel k.
+// All kernels must have the same length.
+//
+// This is a convenience wrapper that calls ConvolveValid for each kernel.
+// For polyphase resampling with multiple filter phases, this provides
+// a clean API without additional overhead.
+//
+// Panics if kernels have different lengths or if dsts/kernels lengths don't match.
+func ConvolveValidMulti(dsts [][]float32, signal []float32, kernels [][]float32) {
+	numKernels := len(kernels)
+	if numKernels == 0 || len(dsts) < numKernels {
+		return
+	}
+
+	// Validate all kernels have the same length
+	kLen := len(kernels[0])
+	if kLen == 0 || len(signal) < kLen {
+		return
+	}
+	for i := 1; i < numKernels; i++ {
+		if len(kernels[i]) != kLen {
+			panic("simd: all kernels must have the same length")
+		}
+	}
+
+	validLen := len(signal) - kLen + 1
+
+	// Determine actual output length based on smallest dst
+	n := validLen
+	for i := range numKernels {
+		if len(dsts[i]) < n {
+			n = len(dsts[i])
+		}
+	}
+	if n <= 0 {
+		return
+	}
+
+	convolveValidMulti32(dsts, signal, kernels, n, kLen)
+}
+
+// ConvolveValidMaxAbs returns max(|valid-convolution output|) without
+// materializing the output slice: the peak (infinity norm) of the FIR applied to
+// signal with no zero-padding. Returns 0 when len(kernel) == 0 or
+// len(signal) < len(kernel).
+//
+// Each output element is a SIMD dot product; the abs-max is fused into the pass,
+// so there is no scratch buffer and no second scan over an output array. This is
+// the peak-detection / true-peak primitive. a is read-only; the call allocates
+// nothing.
+func ConvolveValidMaxAbs(signal, kernel []float32) float32 {
+	if len(kernel) == 0 || len(signal) < len(kernel) {
+		return 0
+	}
+	return convolveValidMaxAbs32(signal, kernel)
+}
+
+// ConvolveValidMaxAbsMulti returns the single maximum of |valid-convolution
+// output| across every kernel applied to signal, without materializing any
+// output. This is the polyphase true-peak primitive: pass the N phase kernels and
+// get back the peak of the reconstructed signal in one call. Returns 0 when
+// kernels is empty, the first kernel is empty, or len(signal) is shorter than the
+// kernel length. The call allocates nothing.
+//
+// Panics if the kernels do not all share one length, matching [ConvolveValidMulti].
+func ConvolveValidMaxAbsMulti(signal []float32, kernels [][]float32) float32 {
+	numKernels := len(kernels)
+	if numKernels == 0 {
+		return 0
+	}
+	kLen := len(kernels[0])
+	if kLen == 0 || len(signal) < kLen {
+		return 0
+	}
+	for i := 1; i < numKernels; i++ {
+		if len(kernels[i]) != kLen {
+			panic("simd: all kernels must have the same length")
+		}
+	}
+	var m float32
+	for _, kernel := range kernels {
+		if km := convolveValidMaxAbs32(signal, kernel); km > m {
+			m = km
+		}
+	}
+	return m
+}
+
+// Sigmoid computes the sigmoid activation function: dst[i] = 1 / (1 + e^(-src[i])).
+// This is commonly used as an activation function in neural networks.
+// Processes min(len(dst), len(src)) elements.
+//
+// Uses AVX2 on AMD64 (8x float32), NEON on ARM64 (4x float32). FMA is not
+// used: the kernel reconstructs 2^k with 256-bit integer ops instead.
+func Sigmoid(dst, src []float32) {
+	n := min(len(dst), len(src))
+	if n == 0 {
+		return
+	}
+	sigmoid32(dst[:n], src[:n])
+}
+
+// SigmoidInPlace computes the sigmoid activation function in-place: a[i] = 1 / (1 + e^(-a[i])).
+// This is commonly used as an activation function in neural networks.
+//
+// Uses AVX2 on AMD64 (8x float32), NEON on ARM64 (4x float32). FMA is not
+// used: the kernel reconstructs 2^k with 256-bit integer ops instead.
+func SigmoidInPlace(a []float32) {
+	if len(a) == 0 {
+		return
+	}
+	sigmoid32(a, a)
+}
+
+// ReLU computes the Rectified Linear Unit: dst[i] = max(0, src[i]).
+// This is commonly used as an activation function in neural networks.
+// Processes min(len(dst), len(src)) elements.
+//
+// Uses AVX on AMD64 (8x float32), NEON on ARM64 (4x float32).
+func ReLU(dst, src []float32) {
+	n := min(len(dst), len(src))
+	if n == 0 {
+		return
+	}
+	relu32(dst[:n], src[:n])
+}
+
+// ReLUInPlace computes ReLU in-place: a[i] = max(0, a[i]).
+func ReLUInPlace(a []float32) {
+	if len(a) == 0 {
+		return
+	}
+	relu32(a, a)
+}
+
+// ClampScale performs fused clamp and scale: dst[i] = (clamp(src[i], min, max) - min) * scale.
+// This is useful for normalizing data to a specific range.
+// Processes min(len(dst), len(src)) elements.
+//
+// Uses AVX on AMD64 (8x float32), NEON on ARM64 (4x float32).
+func ClampScale(dst, src []float32, minVal, maxVal, scale float32) {
+	n := min(len(dst), len(src))
+	if n == 0 {
+		return
+	}
+	clampScale32(dst[:n], src[:n], minVal, maxVal, scale)
+}
+
+// Tanh computes the hyperbolic tangent: dst[i] = tanh(src[i]).
+// Uses fast approximation: tanh(x) ≈ x / (1 + |x|) for |x| < 1, sign(x) for |x| >= 2.5, polynomial otherwise.
+// Processes min(len(dst), len(src)) elements.
+//
+// Uses AVX2 on AMD64 (8x float32), NEON on ARM64 (4x float32).
+func Tanh(dst, src []float32) {
+	n := min(len(dst), len(src))
+	if n == 0 {
+		return
+	}
+	tanh32(dst[:n], src[:n])
+}
+
+// TanhInPlace computes tanh in-place: a[i] = tanh(a[i]).
+func TanhInPlace(a []float32) {
+	if len(a) == 0 {
+		return
+	}
+	tanh32(a, a)
+}
+
+// Exp computes the exponential function: dst[i] = e^src[i].
+// Processes min(len(dst), len(src)) elements.
+//
+// The SIMD paths use range reduction plus a degree-5 polynomial, giving a
+// maximum relative error of about 7e-6. Inputs are clamped to [-88, 88] so
+// results stay finite (exp(88) is near MaxFloat32); inputs below about -88
+// underflow to 0. This matches the pure-Go fallback's clamping.
+//
+// Uses AVX2 on AMD64 (8x float32), NEON on ARM64 (4x float32), and falls
+// back to math.Exp otherwise.
+func Exp(dst, src []float32) {
+	n := min(len(dst), len(src))
+	if n == 0 {
+		return
+	}
+	exp32(dst[:n], src[:n])
+}
+
+// ExpInPlace computes exp in-place: a[i] = e^a[i].
+func ExpInPlace(a []float32) {
+	if len(a) == 0 {
+		return
+	}
+	exp32(a, a)
+}
+
+// Log computes the natural logarithm elementwise: dst[i] = ln(src[i]).
+// Processes min(len(dst), len(src)) elements. Edge cases match math.Log:
+// Log(0) = -Inf, Log(x < 0) = NaN, Log(+Inf) = +Inf, Log(NaN) = NaN.
+//
+// On AVX2+FMA and NEON hosts a vectorized kernel is used (Cephes logf
+// degree-8 minimax polynomial; worst-case relative error ~1.4e-7, about one
+// float32 ulp, including subnormal inputs). Elsewhere it falls back to the
+// float64-accurate Go path. Allocation-free and safe for concurrent use on
+// disjoint buffers.
+func Log(dst, src []float32) {
+	n := min(len(dst), len(src))
+	if n == 0 {
+		return
+	}
+	log32(dst[:n], src[:n])
+}
+
+// LogInPlace computes the natural logarithm in place: a[i] = ln(a[i]).
+func LogInPlace(a []float32) {
+	if len(a) == 0 {
+		return
+	}
+	log32(a, a)
+}
+
+// Log2 computes the base-2 logarithm elementwise: dst[i] = log2(src[i]).
+// Useful for log-frequency and octave math. Processes min(len(dst), len(src))
+// elements; edge cases match math.Log2.
+func Log2(dst, src []float32) {
+	n := min(len(dst), len(src))
+	if n == 0 {
+		return
+	}
+	log2_32(dst[:n], src[:n])
+}
+
+// Log10 computes the base-10 logarithm elementwise: dst[i] = log10(src[i]).
+// This is the building block for dB conversion (20*log10 for amplitude,
+// 10*log10 for power) and log-mel spectrograms. Processes
+// min(len(dst), len(src)) elements; edge cases match math.Log10.
+func Log10(dst, src []float32) {
+	n := min(len(dst), len(src))
+	if n == 0 {
+		return
+	}
+	log10_32(dst[:n], src[:n])
+}
+
+// Log10Floored computes dst[i] = log10(max(src[i], floor)) for every element: a
+// floored base-10 logarithm. The floor is an exact lower clamp applied before the
+// logarithm, so a zero, negative, or tiny input maps to log10(floor) rather than
+// -Inf or NaN; pass a small positive floor (for example a spectrogram noise
+// floor) to keep every result finite.
+//
+// It composes an exact lower clamp with the existing log10 kernel: it is
+// equivalent to Clamp(dst, src, floor, +Inf) then Log10(dst, dst), bit-identical
+// to that pair on each dispatch path. The clamp and the log run as two passes,
+// not a single fused kernel; a fused single-pass floored log10 is deferred (the
+// log dominates, so the extra clamp pass is a small fraction of the cost).
+// Processes min(len(dst), len(src)) elements; in-place safe (dst may alias src).
+func Log10Floored(dst, src []float32, floor float32) {
+	n := min(len(dst), len(src))
+	if n == 0 {
+		return
+	}
+	// Exact lower floor (max with floor via a +Inf upper bound), then the
+	// standard log10 kernel. For the intended positive-finite magnitude/power
+	// domain the clamp introduces no rounding beyond Log10's own.
+	clamp32(dst[:n], src[:n], floor, float32(math.Inf(1)))
+	log10_32(dst[:n], dst[:n])
+}
+
+// Pow raises each element to a scalar power: dst[i] = src[i]**exp. The scalar
+// exponent is the common DSP case (for example the ^0.35 power-law compression
+// in PCEN). Processes min(len(dst), len(src)) elements; edge cases match
+// math.Pow (Pow(x, 0) = 1, Pow(negative, non-integer) = NaN, Pow(0, negative)
+// = +Inf).
+//
+// On AVX2+FMA and NEON hosts, slices whose elements are all positive and
+// finite are computed with a fused exp(exp*ln(x)) kernel (relative error
+// ~1.4e-5, mirroring the Exp core); overflow yields +Inf and underflow 0,
+// matching math.Pow. Slices containing non-positive, infinite, or NaN bases,
+// and calls with a zero or non-finite exponent, take the exact scalar path.
+// Allocation-free and safe for concurrent use on disjoint buffers.
+func Pow(dst, src []float32, exp float32) {
+	n := min(len(dst), len(src))
+	if n == 0 {
+		return
+	}
+	pow32(dst[:n], src[:n], exp)
+}
+
+// PowInPlace raises each element to a scalar power in place: a[i] = a[i]**exp.
+func PowInPlace(a []float32, exp float32) {
+	if len(a) == 0 {
+		return
+	}
+	pow32(a, a, exp)
+}
+
+// PowElem raises each base to its own exponent: dst[i] = base[i]**exp[i].
+// Processes min(len(dst), len(base), len(exp)) elements; edge cases match
+// math.Pow. The SIMD fast path and its fallback rules match Pow, with the
+// additional requirement that every exponent is finite.
+func PowElem(dst, base, exp []float32) {
+	n := min(len(dst), len(base), len(exp))
+	if n == 0 {
+		return
+	}
+	powElem32(dst[:n], base[:n], exp[:n])
+}
+
+// Int32ToFloat32Scale converts int32 samples to float32 and scales in one pass.
+// dst[i] = float32(src[i]) * scale
+//
+// This is optimized for audio processing where PCM samples need to be converted
+// to normalized floating-point. For example, 16-bit audio uses scale = 1.0/32768.0
+// and 32-bit audio uses scale = 1.0/2147483648.0.
+//
+// Processes min(len(dst), len(src)) elements.
+//
+// Uses AVX on AMD64 (8x int32), NEON on ARM64 (4x int32).
+func Int32ToFloat32Scale(dst []float32, src []int32, scale float32) {
+	n := min(len(dst), len(src))
+	if n == 0 {
+		return
+	}
+	int32ToFloat32Scale(dst[:n], src[:n], scale)
+}
+
+// Int32ToFloat32ScaleUnsafe converts int32 samples to float32 and scales without
+// length validation. This is a low-overhead variant for performance-critical code paths.
+//
+// PRECONDITIONS (caller must ensure):
+//   - len(dst) >= len(src)
+//   - len(src) > 0
+//
+// Violating these preconditions results in undefined behavior.
+// Use Int32ToFloat32Scale for safe operation with automatic length handling.
+func Int32ToFloat32ScaleUnsafe(dst []float32, src []int32, scale float32) {
+	// Slice dst to len(src) to ensure SIMD implementations don't read past src
+	int32ToFloat32Scale(dst[:len(src)], src, scale)
+}
+
+// Int32ToFloat32ScaleAdd converts, scales and accumulates in one pass:
+//
+//	dst[i] = a[i] + float32(src[i])*scale
+//
+// It is the fused single-pass form of the dequantize-accumulate shape that
+// otherwise needs a temporary: Int32ToFloat32Scale(tmp, src, scale) followed by
+// Add(dst, a, tmp). This mixed-precision AXPY whose increment is quantized integer
+// data appears wherever integer counts or quantized values feed a float
+// accumulation, such as rate-distortion cost curves (distortion plus lambda times
+// an integer bit count), dequantize-and-mix paths, and dequantization of quantized
+// tensors onto a float32 accumulator.
+//
+// The product float32(src[i])*scale is rounded to float32 before the add (two
+// roundings, never an FMA), so the result is bit-identical to Int32ToFloat32Scale
+// into a temporary followed by Add, on every dispatch path including the pure-Go
+// fallback. That two-rounding contract is the load-bearing property, in the same
+// style Float32ToInt32ScaleClamp established.
+//
+// Processes min(len(dst), len(a), len(src)) elements.
+//
+// # Aliasing
+//
+// dst may overlay a exactly (the in-place accumulate dst[i] += float32(src[i])*scale,
+// since each lane reads a[i] before it rewrites dst[i]), following the AddScaled
+// aliasing rule. dst must not overlap a at a shifted offset.
+//
+// Uses AVX on AMD64 (8x int32), NEON on ARM64 (4x int32), with a pure-Go fallback.
+func Int32ToFloat32ScaleAdd(dst, a []float32, src []int32, scale float32) {
+	n := min(len(dst), len(a), len(src))
+	if n == 0 {
+		return
+	}
+	int32ToFloat32ScaleAdd(dst[:n], a[:n], src[:n], scale)
+}
+
+// Int16ToFloat32Scale converts int16 samples to float32 and scales in one pass.
+// dst[i] = float32(src[i]) * scale
+//
+// This fuses the 16-bit PCM audio boundary: 16-bit audio normalizes with
+// scale = 1.0/32768.0 to map [-32768, 32767] into [-1, 1). int16 values are
+// exactly representable in float32, so the only rounding is the multiply.
+//
+// Processes min(len(dst), len(src)) elements.
+//
+// Uses AVX2 on AMD64 (8x int16), NEON on ARM64 (4x int16).
+func Int16ToFloat32Scale(dst []float32, src []int16, scale float32) {
+	n := min(len(dst), len(src))
+	if n == 0 {
+		return
+	}
+	int16ToFloat32Scale(dst[:n], src[:n], scale)
+}
+
+// Int16ToFloat32ScaleUnsafe converts int16 samples to float32 and scales without
+// length validation. This is a low-overhead variant for performance-critical code paths.
+//
+// PRECONDITIONS (caller must ensure):
+//   - len(dst) >= len(src)
+//   - len(src) > 0
+//
+// Violating these preconditions results in undefined behavior.
+// Use Int16ToFloat32Scale for safe operation with automatic length handling.
+func Int16ToFloat32ScaleUnsafe(dst []float32, src []int16, scale float32) {
+	// Slice dst to len(src) to ensure SIMD implementations don't read past src
+	int16ToFloat32Scale(dst[:len(src)], src, scale)
+}
+
+// Float32ToInt16Scale scales float32 samples and converts to int16 PCM in one pass.
+// dst[i] = clamp(roundTiesToEven(src[i]*scale), -32768, 32767)
+//
+// This fuses the float -> 16-bit PCM boundary: normalized audio in [-1, 1] is
+// written back to 16-bit with scale = 32767.0. Behavior is fully specified and
+// identical on every architecture:
+//   - rounding is round-to-nearest, ties to even (one LSB tighter than the
+//     common truncating int16(f*scale) cast);
+//   - out-of-range values saturate to the int16 range rather than wrapping;
+//   - +Inf -> 32767, -Inf -> -32768, NaN -> 0.
+//
+// Processes min(len(dst), len(src)) elements.
+//
+// Uses AVX2 on AMD64 (8x float32), NEON on ARM64 (4x float32).
+func Float32ToInt16Scale(dst []int16, src []float32, scale float32) {
+	n := min(len(dst), len(src))
+	if n == 0 {
+		return
+	}
+	float32ToInt16Scale(dst[:n], src[:n], scale)
+}
+
+// Float32ToInt16ScaleUnsafe scales float32 samples and converts to int16 without
+// length validation. This is a low-overhead variant for performance-critical code paths.
+//
+// PRECONDITIONS (caller must ensure):
+//   - len(dst) >= len(src)
+//   - len(src) > 0
+//
+// Violating these preconditions results in undefined behavior.
+// Use Float32ToInt16Scale for safe operation with automatic length handling.
+func Float32ToInt16ScaleUnsafe(dst []int16, src []float32, scale float32) {
+	// Slice dst to len(src) to ensure SIMD implementations don't write past dst
+	float32ToInt16Scale(dst[:len(src)], src, scale)
+}
+
+// Float32ToInt32ScaleClamp converts float32 to int32 in one pass:
+//
+//	dst[i] = int32(clamp(src[i]*scale + offset, minV, maxV))   // truncated toward zero
+//
+// It is the int32 sibling of Float32ToInt16Scale for the float -> fixed-point
+// boundary, with caller-supplied bounds and an additive offset: the classic
+// scale, add-a-rounding-constant, clamp, then truncate idiom of fixed-point DSP
+// and affine quantization. Behavior is fully specified and identical on every
+// architecture:
+//   - the multiply and the add are two separate float32 roundings (the product
+//     rounds before offset is added); they are never contracted into an FMA;
+//   - truncation is toward zero (like a Go int32(v) cast, one LSB looser than
+//     round-to-nearest);
+//   - out-of-range values clamp to [minV, maxV] rather than wrapping;
+//   - +Inf -> maxV, -Inf -> minV, NaN -> 0.
+//
+// Callers must keep minV and maxV non-NaN and within the float32-representable
+// int32 range: minV >= -2147483648.0 and maxV <= 2147483520.0 (the largest
+// float32 not exceeding MaxInt32; float32(math.MaxInt32) rounds up to 2^31 and
+// is out of contract). Outside that range the conversion of an out-of-range
+// value is architecture-dependent (x86 yields the integer indefinite
+// 0x80000000; ARM64 saturates).
+//
+// Processes min(len(dst), len(src)) elements.
+//
+// Uses AVX on AMD64 (8x float32; the int32 output needs no saturating pack, so
+// AVX2 is not required), NEON on ARM64 (4x float32).
+func Float32ToInt32ScaleClamp(dst []int32, src []float32, scale, offset, minV, maxV float32) {
+	n := min(len(dst), len(src))
+	if n == 0 {
+		return
+	}
+	float32ToInt32ScaleClamp(dst[:n], src[:n], scale, offset, minV, maxV)
+}
+
+// Float32ToInt32ScaleClampUnsafe converts float32 to int32 without length
+// validation. This is a low-overhead variant for performance-critical code paths.
+//
+// PRECONDITIONS (caller must ensure):
+//   - len(dst) >= len(src)
+//   - len(src) > 0
+//
+// Violating these preconditions results in undefined behavior.
+// Use Float32ToInt32ScaleClamp for safe operation with automatic length handling.
+func Float32ToInt32ScaleClampUnsafe(dst []int32, src []float32, scale, offset, minV, maxV float32) {
+	// Slice dst to len(src) to ensure SIMD implementations don't write past dst
+	float32ToInt32ScaleClamp(dst[:len(src)], src, scale, offset, minV, maxV)
+}
+
+// Float32ToInt32ScaleClampSigned converts float32 magnitudes to int32 in one pass
+// and reattaches a sign, fusing the affine fixed-point quantize and the sign
+// transfer so both happen in a single pass over memory:
+//
+//	dst[i] = copysign(int32(clamp(mag[i]*scale + offset, minV, maxV)), sign[i])
+//
+// It is the signed sibling of Float32ToInt32ScaleClamp, exactly as CopySign is
+// the sign-transfer sibling of the magnitude ops. The magnitude path is identical
+// to Float32ToInt32ScaleClamp: the product rounds before offset is added and is
+// never contracted into an FMA; truncation is toward zero; out-of-range values
+// clamp to [minV, maxV] rather than wrapping; +Inf -> maxV, -Inf -> minV, and a
+// NaN magnitude -> 0 (its sign is not applied). The sign then follows IEEE-754
+// copysign semantics on bit 31 of sign[i]: the clamped magnitude is made
+// non-negative and given sign[i]'s sign bit. In the common case the magnitude is
+// computed from a rectified value and this reattaches the original sign; there
+// sign(0) is a no-op on a zero result, so a zero-magnitude lane is unaffected by
+// its sign source. Only bit 31 of sign[i] is read, so its NaN payload is
+// irrelevant.
+//
+// Fusing this into one kernel avoids the store-to-load stall of the two-pass
+// composition, where Float32ToInt32ScaleClamp writes dst with wide vector stores
+// and a following scalar pass reloads dst with narrow int32 loads to negate: the
+// int32 result never leaves registers between the magnitude and the sign step.
+//
+// The result is bit-identical across the AVX, NEON, and portable-Go paths (no
+// relaxed tier) when max(|minV|, |maxV|) <= 2147483520.0. That is tighter than
+// Float32ToInt32ScaleClamp's minV >= -2147483648.0 lower bound, because the sign
+// step re-expands a floor-clamped magnitude before the truncating conversion: a
+// value clamped to a minV below -2147483520.0 and then given a positive sign
+// reaches +2^31, which converts in an architecture-dependent way (x86 yields the
+// integer indefinite 0x80000000, ARM64 saturates), exactly as the sibling
+// documents for an out-of-range value. Keep minV >= -2147483520.0 (and, as for
+// the sibling, maxV <= 2147483520.0) for a portable result. Processes
+// min(len(dst), len(mag), len(sign)) elements.
+//
+// Uses AVX on AMD64 (8x float32; the sign is applied with VANDPS/VORPS in the
+// float domain, so AVX2 is not required), NEON on ARM64 (4x float32, one BIT).
+func Float32ToInt32ScaleClampSigned(dst []int32, mag, sign []float32, scale, offset, minV, maxV float32) {
+	n := min(len(dst), len(mag), len(sign))
+	if n == 0 {
+		return
+	}
+	float32ToInt32ScaleClampSigned(dst[:n], mag[:n], sign[:n], scale, offset, minV, maxV)
+}
+
+// Float32ToInt32ScaleClampSignedUnsafe converts float32 magnitudes to int32 with
+// a reattached sign without length validation. This is a low-overhead variant for
+// performance-critical code paths.
+//
+// PRECONDITIONS (caller must ensure):
+//   - len(dst) >= len(mag)
+//   - len(sign) >= len(mag)
+//   - len(mag) > 0
+//
+// Violating these preconditions results in undefined behavior.
+// Use Float32ToInt32ScaleClampSigned for safe operation with automatic length handling.
+func Float32ToInt32ScaleClampSignedUnsafe(dst []int32, mag, sign []float32, scale, offset, minV, maxV float32) {
+	// Slice dst and sign to len(mag) so SIMD implementations neither write past dst
+	// nor read past sign.
+	float32ToInt32ScaleClampSigned(dst[:len(mag)], mag, sign[:len(mag)], scale, offset, minV, maxV)
+}
+
+// ============================================================================
+// SPLIT-FORMAT COMPLEX OPERATIONS
+// ============================================================================
+//
+// These functions operate on complex numbers stored in split format (separate
+// real and imaginary arrays) rather than interleaved format ([]complex64).
+// Split format is more SIMD-friendly because it allows direct vector loads
+// without shuffle/deinterleave operations.
+//
+// Use these for FFT implementations and other DSP pipelines where performance
+// is critical.
+
+// MulComplex computes element-wise complex multiplication using split arrays:
+//
+//	dstRe[i] = aRe[i]*bRe[i] - aIm[i]*bIm[i]
+//	dstIm[i] = aRe[i]*bIm[i] + aIm[i]*bRe[i]
+//
+// Processes min(len(dstRe), len(dstIm), len(aRe), len(aIm), len(bRe), len(bIm)) elements.
+//
+// This is the core operation for FFT-based convolution in frequency domain.
+// Split format allows direct SIMD loads without deinterleaving overhead.
+//
+// Aliasing: the product may overwrite either input vector in place (dstRe==aRe
+// with dstIm==aIm, or dstRe==bRe with dstIm==bIm); every path reads a full block
+// of all four inputs before storing either output. The two output components
+// must be distinct, though: dstRe and dstIm may not overlap each other, and
+// neither may shift-overlap an input.
+func MulComplex(dstRe, dstIm, aRe, aIm, bRe, bIm []float32) {
+	n := minLen6(len(dstRe), len(dstIm), len(aRe), len(aIm), len(bRe), len(bIm))
+	if n == 0 {
+		return
+	}
+	mulComplex32(dstRe[:n], dstIm[:n], aRe[:n], aIm[:n], bRe[:n], bIm[:n])
+}
+
+// MulConjComplex computes element-wise multiplication by conjugate using split arrays:
+//
+//	dstRe[i] = aRe[i]*bRe[i] + aIm[i]*bIm[i]
+//	dstIm[i] = aIm[i]*bRe[i] - aRe[i]*bIm[i]
+//
+// Processes min(len(dstRe), len(dstIm), len(aRe), len(aIm), len(bRe), len(bIm)) elements.
+//
+// This is used for cross-correlation in frequency domain.
+//
+// Aliasing: the same in-place rule as MulComplex. The product may overwrite
+// either input vector (dstRe==aRe with dstIm==aIm, or dstRe==bRe with dstIm==bIm),
+// but dstRe and dstIm must be distinct and must not shift-overlap an input.
+func MulConjComplex(dstRe, dstIm, aRe, aIm, bRe, bIm []float32) {
+	n := minLen6(len(dstRe), len(dstIm), len(aRe), len(aIm), len(bRe), len(bIm))
+	if n == 0 {
+		return
+	}
+	mulConjComplex32(dstRe[:n], dstIm[:n], aRe[:n], aIm[:n], bRe[:n], bIm[:n])
+}
+
+// AbsSqComplex computes element-wise magnitude squared using split arrays:
+//
+//	dst[i] = aRe[i]^2 + aIm[i]^2
+//
+// Processes min(len(dst), len(aRe), len(aIm)) elements.
+//
+// This is faster than computing the full magnitude (no sqrt) and is the
+// core operation for power spectrum computation in spectrograms.
+//
+// dst may alias aRe or aIm exactly (each output depends only on its own index),
+// so the power spectrum can be written over an input in place.
+func AbsSqComplex(dst, aRe, aIm []float32) {
+	n := minLen(len(dst), len(aRe), len(aIm))
+	if n == 0 {
+		return
+	}
+	absSqComplex32(dst[:n], aRe[:n], aIm[:n])
+}
+
+func minLen6(a, b, c, d, e, f int) int {
+	return min(a, b, c, d, e, f)
+}
+
+// ButterflyComplex performs the FFT butterfly operation with twiddle factor multiply:
+//
+//	temp_re = lower_re[i]*tw_re[i] - lower_im[i]*tw_im[i]
+//	temp_im = lower_re[i]*tw_im[i] + lower_im[i]*tw_re[i]
+//	upper_re[i], lower_re[i] = upper_re[i]+temp_re, upper_re[i]-temp_re
+//	upper_im[i], lower_im[i] = upper_im[i]+temp_im, upper_im[i]-temp_im
+//
+// This fused operation avoids intermediate memory writes, keeping temp values
+// in registers for significant speedup in FFT inner loops.
+//
+// Processes min(len(upperRe), len(upperIm), len(lowerRe), len(lowerIm), len(twRe), len(twIm)) elements.
+// All slices are modified in-place: upper receives upper+temp, lower receives upper-temp.
+//
+// Aliasing: each butterfly reads its inputs before writing either output, so the
+// four data slices are updated in place. They must be pairwise non-overlapping
+// (distinct headers are not enough; a shifted sub-slice of one array corrupts),
+// and the twiddles twRe/twIm must not overlap any of them.
+func ButterflyComplex(upperRe, upperIm, lowerRe, lowerIm, twRe, twIm []float32) {
+	n := minLen6(len(upperRe), len(upperIm), len(lowerRe), len(lowerIm), len(twRe), len(twIm))
+	if n == 0 {
+		return
+	}
+	butterflyComplex32(upperRe[:n], upperIm[:n], lowerRe[:n], lowerIm[:n], twRe[:n], twIm[:n])
+}
+
+// butterflyStageRadix is the radix of a decimation-in-time stage: every block
+// holds exactly one upper half and one lower half, each span elements long, so
+// a block is butterflyStageRadix*span elements wide.
+const butterflyStageRadix = 2
+
+// ButterflyComplexStage applies one complete radix-2 decimation-in-time stage
+// in place over split-complex data. For every block k in steps of 2*span, and
+// every j in [0, span), it performs the ButterflyComplex operation on the pair
+// (k+j, k+span+j) with twiddle (twRe[j], twIm[j]):
+//
+//	temp_re = re[k+span+j]*twRe[j] - im[k+span+j]*twIm[j]
+//	temp_im = re[k+span+j]*twIm[j] + im[k+span+j]*twRe[j]
+//	re[k+j], re[k+span+j] = re[k+j]+temp_re, re[k+j]-temp_re
+//	im[k+j], im[k+span+j] = im[k+j]+temp_im, im[k+j]-temp_im
+//
+// It is the stage-level form of [ButterflyComplex]. Driving a stage through
+// ButterflyComplex costs one call per block, so the call count grows as the
+// runs get short and per-call overhead dominates the small-span stages. Taking
+// the whole stage lets the implementation pick its own vectorization axis,
+// which is not expressible through the per-block API: across j when span is
+// large enough to fill a vector, and across blocks when span is short enough
+// that a whole vector of them fits. The float32 vector is 8 lanes on AVX and 4
+// on NEON, so span 1, 2 and 4 vectorize across blocks on AVX (1 and 2 on NEON);
+// a span that fills neither axis runs the scalar tail.
+//
+// The stage is a no-op unless span > 0, len(twRe) >= span and len(twIm) >= span,
+// and it is also a no-op when no complete block fits. Blocks are processed while
+// k+2*span <= n, where n = min(len(re), len(im)); a trailing partial block is
+// left untouched.
+//
+// Aliasing: the stage updates re and im in place; re and im must not overlap
+// each other, and the twiddles twRe/twIm must not overlap either.
+//
+// Uses AVX+FMA on AMD64, NEON on ARM64, with a pure Go fallback. As with
+// [ButterflyComplex], results are not guaranteed bit-identical between the
+// vector and fallback paths, so do not depend on exact equality across build
+// targets or across spans.
+func ButterflyComplexStage(re, im []float32, span int, twRe, twIm []float32) {
+	if span <= 0 || len(twRe) < span || len(twIm) < span {
+		return
+	}
+	n := min(len(re), len(im))
+	blockLen := butterflyStageRadix * span
+	blocks := n / blockLen
+	if blocks == 0 {
+		return
+	}
+	used := blocks * blockLen
+	butterflyComplexStage32(re[:used], im[:used], span, blocks, twRe[:span], twIm[:span])
+}
+
+// butterflyStage4Radix is the radix of the radix-4 decimation-in-time stage:
+// every block holds four span-length sub-vectors x0..x3, so a block is
+// butterflyStage4Radix*span elements wide.
+const butterflyStage4Radix = 4
+
+// ButterflyComplexStage4 applies one complete radix-4 decimation-in-time stage in
+// place over split-complex data. For every block k in steps of 4*span, and every
+// j in [0, span), it combines the four sub-vectors x0..x3 at (k+j, k+span+j,
+// k+2*span+j, k+3*span+j) using the three twiddles (tw1[j], tw2[j], tw3[j]):
+//
+//	t1 = x1*tw1[j]; t2 = x2*tw2[j]; t3 = x3*tw3[j]   (full complex multiplies)
+//	a = x0 + t1; b = x0 - t1; c = t2 + t3; d = t2 - t3
+//	re[k+j]        = a.re + c.re; im[k+j]        = a.im + c.im
+//	re[k+span+j]   = b.re + d.im; im[k+span+j]   = b.im - d.re
+//	re[k+2*span+j] = a.re - c.re; im[k+2*span+j] = a.im - c.im
+//	re[k+3*span+j] = b.re - d.im; im[k+3*span+j] = b.im + d.re
+//
+// It is the radix-4 counterpart of [ButterflyComplexStage]: one radix-4 stage at
+// span s does the work of two radix-2 stages, first at span s then at 2*s, in a
+// single pass over the data. Folding two stages into one halves the passes over
+// the array and lets the implementation combine all four points while they are
+// still in registers, which is where a radix-4 core wins over a radix-2 one on a
+// memory-bound transform.
+//
+// # Twiddle convention
+//
+// The three twiddle slices are the powers of w = exp(-2*pi*i/(4*span)):
+//
+//	tw1[j] = w^(2j)   (applied to x1)
+//	tw2[j] = w^j      (applied to x2)
+//	tw3[j] = w^(3j)   (applied to x3)
+//
+// The kernel itself is value-agnostic; those are the values a Cooley-Tukey
+// transform must supply. Two properties are load-bearing and intentional, not
+// mistakes to "fix":
+//
+//   - x1 carries w^(2j), not w^j. The input to a decimation-in-time stage is
+//     radix-2 bit-reversed, which swaps sub-vectors 1 and 2 relative to a plain
+//     radix-4 layout, so x1 takes the square of the base twiddle. With this
+//     convention tw1 is exactly the radix-2 span-s twiddle table (exp(-i*pi*j/s))
+//     and tw2 is the first s entries of the radix-2 span-2s table, so a caller
+//     already holding the radix-2 tables reuses them verbatim.
+//   - The -i and +i cross-adds on the (k+span+j) and (k+3*span+j) outputs
+//     hard-code the FORWARD (negative-exponent) DFT direction. An inverse
+//     transform is a forward pass wrapped in conjugation of the input and output.
+//
+// The stage is a no-op unless span > 0 and all six twiddle slices have length at
+// least span, and it is also a no-op when no complete block fits. Blocks are
+// processed while k+4*span <= n, where n = min(len(re), len(im)); a trailing
+// partial block is left untouched. The span-2 case is never reached by a radix-4
+// Cooley-Tukey schedule (spans run 1, 4, 16, ...), so this stage does not carry a
+// dedicated span-2 or span-3 vector path; such a caller still gets a correct
+// result from the general j-axis path, which for these spans is the per-element
+// scalar tail on both the 8-wide AVX and 4-wide NEON kernels (span/8 and span/4
+// are both zero there, so neither vector loop runs).
+//
+// Aliasing: like ButterflyComplexStage, the stage updates re and im in place; re
+// and im must not overlap each other, and none of the six twiddle slices may
+// overlap them.
+//
+// Uses AVX+FMA on AMD64, NEON on ARM64, with a pure Go fallback. As with
+// [ButterflyComplexStage], results are not guaranteed bit-identical between the
+// vector and fallback paths, so do not depend on exact equality across build
+// targets or across spans.
+func ButterflyComplexStage4(re, im []float32, span int,
+	tw1Re, tw1Im, tw2Re, tw2Im, tw3Re, tw3Im []float32) {
+	if span <= 0 ||
+		len(tw1Re) < span || len(tw1Im) < span ||
+		len(tw2Re) < span || len(tw2Im) < span ||
+		len(tw3Re) < span || len(tw3Im) < span {
+		return
+	}
+	n := min(len(re), len(im))
+	blockLen := butterflyStage4Radix * span
+	blocks := n / blockLen
+	if blocks == 0 {
+		return
+	}
+	used := blocks * blockLen
+	butterflyComplexStage4x32(re[:used], im[:used], span, blocks,
+		tw1Re[:span], tw1Im[:span], tw2Re[:span], tw2Im[:span], tw3Re[:span], tw3Im[:span])
+}
+
+// RealFFTUnpack performs the unpacking step of a real-valued FFT.
+//
+// Given Z = FFT(packed real data of size 2n), this computes the real FFT output X
+// for bins k = 1 to n-1. The formula for each bin is:
+//
+//	conj_z = conj(Z[n-k])
+//	even = 0.5 * (Z[k] + conj_z)
+//	diff = Z[k] - conj_z
+//	odd  = W[k] * (-0.5i) * diff
+//	X[k] = even + odd
+//
+// Expanding the complex arithmetic:
+//
+//	evenRe = 0.5 * (zRe[k] + zRe[n-k])
+//	evenIm = 0.5 * (zIm[k] - zIm[n-k])
+//	diffRe = zRe[k] - zRe[n-k]
+//	diffIm = zIm[k] + zIm[n-k]
+//	oddRe  = 0.5 * (twRe[k-1]*diffIm + twIm[k-1]*diffRe)
+//	oddIm  = 0.5 * (twIm[k-1]*diffIm - twRe[k-1]*diffRe)
+//	outRe[k] = evenRe + oddRe
+//	outIm[k] = evenIm + oddIm
+//
+// Parameters:
+//   - outRe, outIm: Output arrays, X[k] written to index k for k in [1, n-1]
+//   - zRe, zIm: Input Z array of length n
+//   - twRe, twIm: Twiddle factors W[k] at index k-1 (length n-1)
+//
+// The DC bin (k=0) and Nyquist bin (k=n) must be handled separately by the caller.
+// Typical real FFT post-processing:
+//
+//	X[0] = Z[0].real + Z[0].imag  (DC component)
+//	X[n] = Z[0].real - Z[0].imag  (Nyquist component)
+//
+// # Aliasing
+//
+// outRe and outIm must not overlap each other, nor any of zRe, zIm, twRe or
+// twIm, in any way, not even as an exact element-for-element overlay. Bin k
+// reads z at both k and the mirror n-k, plus the twiddles at k-1, before it
+// writes out[k], so any overlay lets a store land on an input that a later bin
+// has not read yet. Measured on the pure Go path, an output overlaid on z first
+// corrupts bin floor(n/2)+1 and every bin above it. The vector kernels survive a
+// few more sizes, because a SIMD block loads its whole input block before
+// storing any output lane, but that is block scheduling rather than a guarantee
+// and it varies with kernel width and n. Passing the same slice as outRe and
+// outIm makes every bin wrong on every path. Pass outputs distinct from the
+// inputs and from each other.
+//
+// Uses AVX+FMA on AMD64, NEON on ARM64, with pure Go fallback.
+func RealFFTUnpack(outRe, outIm, zRe, zIm, twRe, twIm []float32) {
+	n := len(zRe)
+	if n < realFFTUnpackMinN {
+		return
+	}
+	// Validate slice lengths
+	if len(zIm) < n || len(outRe) < n || len(outIm) < n || len(twRe) < n-1 || len(twIm) < n-1 {
+		return
+	}
+	realFFTUnpack32(outRe, outIm, zRe, zIm, twRe, twIm, n)
+}
+
+// RealFFTPower is the fused, power-writing counterpart of RealFFTUnpack: for each
+// bin k in [1, n-1] it unpacks X[k] exactly as RealFFTUnpack does and writes the
+// power dst[k] = |X[k]|^2 in a single pass, without materialising the complex
+// half-spectrum. Given Z = FFT(packed real data of size 2n) and the same twiddles
+// RealFFTUnpack takes, each bin is
+//
+//	conj_z = conj(Z[n-k])
+//	even = 0.5 * (Z[k] + conj_z)
+//	diff = Z[k] - conj_z
+//	odd  = W[k] * (-0.5i) * diff
+//	X[k] = even + odd
+//	dst[k] = X[k].real^2 + X[k].imag^2
+//
+// so it makes a single pass over the spectrum with no intermediate complex bins. A
+// spectrogram, mel front end, or PSD consumer wants |X_k|^2, and computing it as
+// RealFFTUnpack + Mul + FMA is three passes over the bins that write and re-read
+// the complex half-spectrum; folding the magnitude-squared into the unpack drops
+// the two extra passes. f32 is the primary path for the audio ML front ends this
+// serves (mel-spectrogram and PCEN pipelines feeding CNN classifiers). See #245,
+// the f32 sibling of the f64 kernel in #233.
+//
+// Parameters:
+//   - dst: output power, dst[k] = |X[k]|^2 written for k in [1, n-1] (length >= n)
+//   - zRe, zIm: half-size complex spectrum Z, length n
+//   - twRe, twIm: twiddle factors W[k] at index k-1 (length n-1), where
+//     W[k] = exp(-i*pi*k/n) = cos(pi*k/n) - i*sin(pi*k/n)
+//
+// The DC bin (k=0) and Nyquist bin (k=n) are the caller's responsibility, exactly
+// as for RealFFTUnpack. Both are real, so their powers are:
+//
+//	|X[0]|^2 = (Z[0].real + Z[0].imag)^2  (DC)
+//	|X[n]|^2 = (Z[0].real - Z[0].imag)^2  (Nyquist)
+//
+// The SIMD kernels fuse the magnitude-squared with a hardware FMA on their vector
+// lanes (single rounding). The pure-Go path writes a separate multiply and add,
+// but the Go compiler contracts that into an FMA on some architectures (arm64) and
+// not others (amd64). So the results agree only to within rounding, not
+// bit-for-bit, and the exact bits can differ across architectures, exactly as the
+// RealFFTUnpack odd-term FMA already does.
+//
+// # Aliasing
+//
+// dst must not overlap zRe, zIm, twRe or twIm in any way, not even as an exact
+// element-for-element overlay. Bin k reads Z at both k and the mirror n-k plus the
+// twiddle at k-1 before it writes dst at k, and the SIMD kernels re-read the tail
+// input with an overlapping block, so any overlay lets a store land on an input a
+// later bin has not read yet. Same precondition as RealFFTUnpack.
+//
+// Uses AVX+FMA on AMD64, NEON on ARM64, with a pure Go fallback.
+func RealFFTPower(dst, zRe, zIm, twRe, twIm []float32) {
+	n := len(zRe)
+	if n < realFFTUnpackMinN {
+		return
+	}
+	// Validate slice lengths.
+	if len(zIm) < n || len(dst) < n || len(twRe) < n-1 || len(twIm) < n-1 {
+		return
+	}
+	realFFTPower32(dst, zRe, zIm, twRe, twIm, n)
+}
+
+// Reverse reverses a slice: dst[i] = src[len(src)-1-i].
+//
+// Processes min(len(dst), len(src)) elements. The result is stored
+// starting at dst[0].
+//
+// This operation is useful for:
+//   - Real FFT unpacking (reversing the mirrored half)
+//   - Signal processing algorithms requiring time reversal
+//   - General array manipulation
+//
+// Aliasing: in-place reversal (dst == src) is supported. The kernels detect exact
+// data-pointer aliasing at entry and reverse by swapping from both ends, loading
+// each pair before it overwrites either lane. dst must not otherwise overlap src
+// (a shifted overlay is not supported).
+//
+// Uses AVX on AMD64 (8x float32), NEON on ARM64 (4x float32), with pure Go fallback.
+func Reverse(dst, src []float32) {
+	n := min(len(dst), len(src))
+	if n == 0 {
+		return
+	}
+	reverse32(dst[:n], src[:n])
+}
+
+// AddSub computes element-wise sum and difference simultaneously:
+//
+//	sumDst[i] = a[i] + b[i]
+//	diffDst[i] = a[i] - b[i]
+//
+// This fused operation loads a and b only once, improving cache efficiency
+// compared to calling Add and Sub separately.
+//
+// Processes min(len(sumDst), len(diffDst), len(a), len(b)) elements.
+//
+// Aliasing: unlike the plain element-wise maps, AddSub does not support an output
+// overlaid on an input. Its pure-Go tail writes sumDst[i] before reading the
+// input again for diffDst[i], so a sumDst overlaid on a or b is corrupted at the
+// tail lanes. Pass sumDst and diffDst distinct from a, b and from each other.
+//
+// Uses AVX on AMD64 (8x float32), NEON on ARM64 (4x float32), with pure Go fallback.
+func AddSub(sumDst, diffDst, a, b []float32) {
+	n := minLen4(len(sumDst), len(diffDst), len(a), len(b))
+	if n == 0 {
+		return
+	}
+	addSub32(sumDst[:n], diffDst[:n], a[:n], b[:n])
+}
+
+// minLen4 returns the minimum of four lengths.
+func minLen4(a, b, c, d int) int {
+	return min(min(a, b), min(c, d))
+}

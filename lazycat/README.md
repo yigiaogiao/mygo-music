@@ -22,7 +22,7 @@
 
 脚本会：编译 `linux/amd64` 的静态服务端、编译 WebAssembly 前端、把两者放进
 `lazycat/content/`，再调用 `lzc-cli project build`。产物在
-`lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.36.lpk`。
+`lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.37.lpk`。
 
 `lzc-cli` 的查找顺序是 `$LZC_CLI`、`lzc-cli`、`~/.local/share/lzctools/...`，
 最后才用 `npx @lazycatcloud/lzc-cli`。
@@ -35,7 +35,7 @@
 也可以让 `lzc-cli` 直接装到已配置的微服：
 
 ```bash
-lzc-cli lpk install lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.36.lpk
+lzc-cli lpk install lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.37.lpk
 ```
 
 （需要先 `lzc-cli box add-by-ssh <用户> <地址>` 并 `lzc-cli box switch` 选中它。）
@@ -86,6 +86,15 @@ lzc-cli lpk install lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.36.lpk
 - **音频**：通过带签名的 `/api/audio/<token>` 地址以 HTTP Range 流式播放，
   浏览器可以拖动进度。
 - **手机**：窗口窄于 760px 时侧边栏收进左上角菜单，播放条变紧凑，页面变单列。
+  手机上图标按钮的点击范围向外多留 5px（布局不变），手指更好按。
+- **触屏滚动（vendored 补丁）**：上游 MyGo 的 web 后端只认鼠标，触摸拖动不会
+  产生滚动事件，加上画布 `touch-action: none`，手机上内容滚不动。本项目用
+  `go mod vendor` 把 MyGo 放进 `vendor/`，新增
+  `vendor/github.com/egoist/mygo/internal/web/touch.go`，在 `surface.go`
+  里接上指针事件：点按照常派发（按钮、滑块可用），移动超过 8px 后纵向拖动
+  转为 `PointerScroll`（先 `PointerCancel` 防止误点），横向拖动保留按压给
+  进度条并横向滚动，松手后带惯性。升级 MyGo 时先保留这个文件和
+  `surface.go` 里的改动；如果重新 `go mod vendor`，改完要重新应用。
 
 ## 本地开发
 

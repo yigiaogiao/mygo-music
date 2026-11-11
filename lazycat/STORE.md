@@ -9,7 +9,7 @@
 
 | 材料 | 文件 |
 | --- | --- |
-| 安装包 | `lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.36.lpk`（构建后生成） |
+| 安装包 | `lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.37.lpk`（构建后生成） |
 | 图标 | `lazycat/icon.png`（512×512 PNG，约 190 KB） |
 | 桌面截图 | `lazycat/store/screenshots/pc/01-home.png` … `04-settings.png`（1920×1080，16:9） |
 | 手机截图 | `lazycat/store/screenshots/mobile/01-home.png` … `04-now-playing.png`（720×405，16:9） |
@@ -29,7 +29,7 @@ cd ~/orca/projects/mygo-music
 
 ```bash
 ~/.local/share/lzctools/node_modules/.bin/lzc-cli lpk info \
-  lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.36.lpk
+  lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.37.lpk
 ```
 
 重点确认：`package`、`version`、`icon` 都在，镜像只有官方运行时
@@ -155,7 +155,7 @@ LPK 是唯一的交付物，装在微服上；手机端是「懒猫微服」客�
 
 ```bash
 ~/.local/share/lzctools/node_modules/.bin/lzc-cli appstore pre-publish \
-  lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.36.lpk \
+  lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.37.lpk \
   -c "首个版本，验证安装、播放和歌词"
 ```
 
@@ -168,7 +168,7 @@ LPK 是唯一的交付物，装在微服上；手机端是「懒猫微服」客�
 
 ```bash
 ~/.local/share/lzctools/node_modules/.bin/lzc-cli appstore publish \
-  lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.36.lpk \
+  lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.37.lpk \
   --clangs=zh:lazycat/store/changelog.zh-CN.txt \
   --clangs=en:lazycat/store/changelog.en-US.txt
 ```
@@ -203,7 +203,7 @@ LPK 是唯一的交付物，装在微服上；手机端是「懒猫微服」客�
 - [ ] `lazycat/package.yml` 版本已递增，`cmd/server/main.go` 与 `lazycat/README.md` 对齐
 - [ ] `./scripts/build-lpk.sh` 成功，二进制是 `statically linked`
 - [ ] `lzc-cli project lint` 无 error
-- [ ] 本机侧载 0.1.36 能打开、能播放、重启后数据还在
+- [ ] 本机侧载 0.1.37 能打开、能播放、重启后数据还在
 - [ ] 开发者中心：图标 + 中英文各自的描述/关键词/来源
 - [ ] **每个语言都勾选适用平台并上传截图**（桌面 ≥2、手机 ≥3）
 - [ ] 网页流程：上传新版本 → 填更新说明 → 提交审核
