@@ -17,7 +17,7 @@ import (
 	"mygo-music/internal/server"
 )
 
-var version = "0.1.38"
+var version = "0.1.39"
 
 func main() {
 	addr := flag.String("addr", env("ADDR", ":8090"), "address to listen on")

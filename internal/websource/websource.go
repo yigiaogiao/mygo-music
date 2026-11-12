@@ -129,14 +129,24 @@ func (s *Source) BrowseFolders(path string) (*FolderPage, error) {
 	return &out, err
 }
 
-// AddFolder asks the server to read a folder of the netdisk.
+// AddFolder asks the server to read a folder of the netdisk, and takes the
+// list of folders anew, so it shows at once rather than at the next look.
 func (s *Source) AddFolder(path string) error {
-	return s.call("AddFolder", []any{path}, nil)
+	if err := s.call("AddFolder", []any{path}, nil); err != nil {
+		return err
+	}
+	s.look()
+	return nil
 }
 
-// RemoveFolder asks the server to stop reading a folder.
+// RemoveFolder asks the server to stop reading a folder, and takes the list of
+// folders anew, so it goes at once rather than at the next look.
 func (s *Source) RemoveFolder(path string) error {
-	return s.call("RemoveFolder", []any{path}, nil)
+	if err := s.call("RemoveFolder", []any{path}, nil); err != nil {
+		return err
+	}
+	s.look()
+	return nil
 }
 
 // OnChange sets what's called, on any goroutine, after what the server lists
@@ -162,19 +172,26 @@ func (s *Source) watch() {
 		case <-s.ctx.Done():
 			return
 		case <-t.C:
+			s.look()
 		}
-		st, err := s.fetchStatus()
-		if err != nil {
-			continue
-		}
-		s.mu.Lock()
-		changed := s.known && (st.Scanning != s.status.Scanning || st.Tracks != s.status.Tracks || !sameFolders(st.Folders, s.status.Folders))
-		s.status, s.known = st, true
-		fn := s.onChange
-		s.mu.Unlock()
-		if changed && fn != nil {
-			fn()
-		}
+	}
+}
+
+// look asks the server what it lists now, and tells the app if that changed.
+// The watch takes it every few seconds; a folder added or removed takes it as
+// soon as the server has it, so the settings list shows the change at once.
+func (s *Source) look() {
+	st, err := s.fetchStatus()
+	if err != nil {
+		return
+	}
+	s.mu.Lock()
+	changed := s.known && (st.Scanning != s.status.Scanning || st.Tracks != s.status.Tracks || !sameFolders(st.Folders, s.status.Folders))
+	s.status, s.known = st, true
+	fn := s.onChange
+	s.mu.Unlock()
+	if changed && fn != nil {
+		fn()
 	}
 }
 
