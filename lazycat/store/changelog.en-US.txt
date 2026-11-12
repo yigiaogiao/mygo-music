@@ -1,3 +1,4 @@
+- Fix account isolation: each user browses and plays only the folders in their own netdisk, and their playlists, favorites and scan cache are separate
 - Fix scrolling on phones: drag up or down to scroll a page, drag the progress bar to seek, with momentum when you let go
 - Bigger touch targets for the heart, more and transport buttons on phones
 - The desktop layout and behavior are unchanged

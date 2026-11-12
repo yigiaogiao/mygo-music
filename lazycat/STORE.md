@@ -9,7 +9,7 @@
 
 | 材料 | 文件 |
 | --- | --- |
-| 安装包 | `lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.37.lpk`（构建后生成） |
+| 安装包 | `lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.38.lpk`（构建后生成） |
 | 图标 | `lazycat/icon.png`（512×512 PNG，约 190 KB） |
 | 桌面截图 | `lazycat/store/screenshots/pc/01-home.png` … `04-settings.png`（1920×1080，16:9） |
 | 手机截图 | `lazycat/store/screenshots/mobile/01-home.png` … `04-now-playing.png`（720×405，16:9） |
@@ -29,7 +29,7 @@ cd ~/orca/projects/mygo-music
 
 ```bash
 ~/.local/share/lzctools/node_modules/.bin/lzc-cli lpk info \
-  lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.37.lpk
+  lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.38.lpk
 ```
 
 重点确认：`package`、`version`、`icon` 都在，镜像只有官方运行时
@@ -155,7 +155,7 @@ LPK 是唯一的交付物，装在微服上；手机端是「懒猫微服」客�
 
 ```bash
 ~/.local/share/lzctools/node_modules/.bin/lzc-cli appstore pre-publish \
-  lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.37.lpk \
+  lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.38.lpk \
   -c "首个版本，验证安装、播放和歌词"
 ```
 
@@ -168,7 +168,7 @@ LPK 是唯一的交付物，装在微服上；手机端是「懒猫微服」客�
 
 ```bash
 ~/.local/share/lzctools/node_modules/.bin/lzc-cli appstore publish \
-  lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.37.lpk \
+  lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.38.lpk \
   --clangs=zh:lazycat/store/changelog.zh-CN.txt \
   --clangs=en:lazycat/store/changelog.en-US.txt
 ```
@@ -182,6 +182,21 @@ LPK 是唯一的交付物，装在微服上；手机端是「懒猫微服」客�
   `node-fetch` `DeprecationWarning` 可忽略，末尾出现
   `The application was submitted successfully` 就是成功（2026-11-11 用
   0.1.37 实测）。
+
+## 多用户隔离（2026-11-12，0.1.37 被拒后）
+
+- **拒因**：添加音乐文件夹时能看到微服不同账号之间的数据——选择文件夹页面在
+  `home` 下同时列出了 `admin`、`test`；平台要求改为多实例，并暂时下架了应用。
+- **根因**：`lzc-manifest.yml` 里 `multi_instance: false`。单实例下
+  `/lzcapp/run/mnt/home` 是**全局用户文稿根**，直接拿它当音乐根目录浏览就会
+  暴露所有人的目录。
+- **修法**（0.1.38）：`multi_instance: true`——每个用户独立容器，
+  `/lzcapp/run/mnt/home` 只映射本人文稿，`/lzcapp/var` 也各自独立。服务端在
+  `LAZYCAT_APP_DEPLOY_UID` 非空时只认 `/lzcapp/run/mnt/home`，并修掉「目录为空
+  就换下一个挂载点」的探测逻辑，避免退回箱子级路径。
+- **注意**：单实例 ↔ 多实例切换会改变 `/lzcapp/var` 的存储路径，旧数据不会自动
+  迁移；官方审核指南要求变更实例时自己做好迁移/恢复。0.1.37 刚上架即下架，
+  用户数据影响很小，但升级前要跟用户说明。
 
 ## 第 6 步：审核关注点（对照自查）
 
@@ -207,7 +222,7 @@ LPK 是唯一的交付物，装在微服上；手机端是「懒猫微服」客�
 - [ ] `lazycat/package.yml` 版本已递增，`cmd/server/main.go` 与 `lazycat/README.md` 对齐
 - [ ] `./scripts/build-lpk.sh` 成功，二进制是 `statically linked`
 - [ ] `lzc-cli project lint` 无 error
-- [ ] 本机侧载 0.1.37 能打开、能播放、重启后数据还在
+- [ ] 本机侧载 0.1.38 能打开、能播放、重启后数据还在
 - [ ] 开发者中心：图标 + 中英文各自的描述/关键词/来源
 - [ ] **每个语言都勾选适用平台并上传截图**（桌面 ≥2、手机 ≥3）
 - [ ] 网页流程：上传新版本 → 填更新说明 → 提交审核

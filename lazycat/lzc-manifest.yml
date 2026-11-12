@@ -1,6 +1,12 @@
 application:
   subdomain: mygo-music
-  multi_instance: false
+  # Each user of the microserver gets their own container and their own
+  # view of the netdisk: in a multi-instance deployment
+  # /lzcapp/run/mnt/home is the owner's documents, not the whole box's,
+  # so one account cannot browse another's music (the store's review
+  # turned the app down for exactly that). It also keeps each user's
+  # library, playlists and liked songs in their own /lzcapp/var.
+  multi_instance: true
   # The service is named "music"; the platform gives it a DNS name under the
   # package. The gateway sends every path to the Go server.
   routes:

@@ -17,7 +17,7 @@ import (
 	"mygo-music/internal/server"
 )
 
-var version = "0.1.37"
+var version = "0.1.38"
 
 func main() {
 	addr := flag.String("addr", env("ADDR", ":8090"), "address to listen on")
@@ -78,26 +78,25 @@ func main() {
 // defaultMusicDir is the LazyCat netdisk. It is the user's document root,
 // which newer runtimes also expose as /lzcapp/document; /lzcapp/media is the
 // fallback for a netdisk mounted as media. Local runs set -music instead.
+//
+// A multi-instance deployment belongs to one user, and the runtime mounts
+// that user's documents at /lzcapp/run/mnt/home and nothing else. The other
+// paths are the box's, not the user's, so they are not tried: falling back
+// to them would show one account the folders of another.
 func defaultMusicDir() string {
-	first := ""
+	if os.Getenv("LAZYCAT_APP_DEPLOY_UID") != "" {
+		return "/lzcapp/run/mnt/home"
+	}
 	for _, dir := range []string{
 		"/lzcapp/run/mnt/home",
 		"/lzcapp/document",
 		"/lzcapp/media/RemoteFS",
 	} {
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			continue
-		}
-		if first == "" {
-			first = dir
-		}
-		if len(entries) > 0 {
+		// The first that is there, even if empty: its emptiness is the
+		// user's, and stepping to another mount would leave their netdisk.
+		if info, err := os.Stat(dir); err == nil && info.IsDir() {
 			return dir
 		}
-	}
-	if first != "" {
-		return first
 	}
 	return "/lzcapp/media/RemoteFS"
 }

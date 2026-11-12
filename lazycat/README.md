@@ -22,7 +22,7 @@
 
 脚本会：编译 `linux/amd64` 的静态服务端、编译 WebAssembly 前端、把两者放进
 `lazycat/content/`，再调用 `lzc-cli project build`。产物在
-`lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.37.lpk`。
+`lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.38.lpk`。
 
 `lzc-cli` 的查找顺序是 `$LZC_CLI`、`lzc-cli`、`~/.local/share/lzctools/...`，
 最后才用 `npx @lazycatcloud/lzc-cli`。
@@ -35,7 +35,7 @@
 也可以让 `lzc-cli` 直接装到已配置的微服：
 
 ```bash
-lzc-cli lpk install lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.37.lpk
+lzc-cli lpk install lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.38.lpk
 ```
 
 （需要先 `lzc-cli box add-by-ssh <用户> <地址>` 并 `lzc-cli box switch` 选中它。）
@@ -80,6 +80,13 @@ lzc-cli lpk install lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.37.lpk
   `/lzcapp/run/mnt/home`、`/lzcapp/document`、`/lzcapp/media/RemoteFS`，
   选第一个可读的目录。`enable_media_access`、`media.read` 保留作兜底，
   `net.internet` 用于 LRCLib。权限没给时页面会明确提示读不到网盘。
+- **多用户隔离**：`multi_instance: true`，微服上每个用户各有一个容器：
+  `/lzcapp/run/mnt/home` 只对应本人的文稿目录，歌单、喜欢和扫描缓存也在各自的
+  `/lzcapp/var` 里。单实例下这个路径是**全局**文稿根，浏览文件夹时会看到
+  `admin`、`test` 等其他账号的目录，商店审核会直接拒绝（0.1.37 被拒过一次）。
+  服务端还有一道兜底：`LAZYCAT_APP_DEPLOY_UID` 非空（多实例）时只使用
+  `/lzcapp/run/mnt/home`，不再探测 `/lzcapp/document`、`/lzcapp/media` 等箱子级
+  路径；探测挂载点时也不再因为目录为空就跳到下一个。
 - **持久化**：`/lzcapp/var` 是平台保证保留的目录，映射到容器的 `/data`。
 - **HTTPS 证书**：包里带了 `ca-certificates.crt`，用 `SSL_CERT_FILE` 指过去，
   默认运行时没有根证书也能访问 LRCLib。
