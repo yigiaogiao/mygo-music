@@ -9,7 +9,7 @@
 
 | 材料 | 文件 |
 | --- | --- |
-| 安装包 | `lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.44.lpk`（构建后生成） |
+| 安装包 | `lazycat/dist/cloud.lazycat.app.mygomusic-v<版本号>.lpk`（构建后生成，当前 0.1.47） |
 | 图标 | `lazycat/icon.png`（512×512 PNG，约 190 KB） |
 | 桌面截图 | `lazycat/store/screenshots/pc/01-home.png` … `04-settings.png`（1920×1080，16:9） |
 | 手机截图 | `lazycat/store/screenshots/mobile/01-home.png` … `04-now-playing.png`（720×405，16:9） |
@@ -289,6 +289,39 @@ LPK 是唯一的交付物，装在微服上；手机端是「懒猫微服」客�
   含「服务器一直不回响应头」和「卡住的加载在回前台时重开」两个用例）；
   `GOOS=js GOARCH=wasm go build ./...`；LPK 侧载后息屏跨过至少两次换歌再解锁。
 
+## 手机拖动进度条后控制失效 / 锁屏按钮失效（2026-11-26，0.1.47）
+
+- **现象**：在手机上拖动音乐组件的进度条没有效果，松手后上一首、下一首、暂停
+  全部失效；歌还在放，清掉任务重开应用却显示没有播放。锁屏后，锁屏界面的
+  上一首/下一首/暂停/拖动也全部没反应。
+- **根因**：客户端拖进度条时发来的 `lzc_media_session_event`（`seekto`）里，
+  `data` 偶尔为空、字符串或对象。旧代码直接 `Value.Float()` 取值，Go 的
+  `syscall/js` 遇到 `undefined` 会 panic，**整个 Go wasm 程序退出（exit code 2），
+  而页面和 `<audio>` 元素继续播放**——所以按钮全死、歌不停、重开无状态。
+  锁屏按钮不走事件，而是直接调用页面上的
+  `window.__nativePlay/__nativePause/__nativePrev/__nativeNext/__nativeSeekTo`
+  （与懒猫音乐 1.0.6 的 `mediaSessionBridge.ts` 一致），旧适配器没定义这些函数。
+- **修法**：
+  1. `web/lzc-media.js` 的 `seekTime` 接受数字/数字字符串/`{seekTime}`/
+     `{position}` 等形状，单位按客户端标准的**秒**处理，只有明显是毫秒的值才
+     换算；没有有效数字的 seek 直接丢弃。同时定义 `window.__native*` 五个全局
+     函数，事件和全局调用两路都派发。
+  2. vendored `internal/web/nowplaying.go` 先判 `Type()` 再取值，并包
+     `recover`：以后宿主传来任何异常参数都不会再杀死程序。
+  3. 媒体元素模式 seek 直接设 `currentTime`（`SeekInstant`），不再暂停等解码或
+     走计时器；元素没有 `src`（`networkState == 0`）时不设，避免抛异常。
+  4. 应用内进度条在系统接管指针（`pointercancel`，如纵向滚动）时按取消处理，
+     不误 seek，之后按钮保持可用。
+- **验证**：Android UA 的 Chrome 里把 seek 数据形状（无 `data`、字符串、毫秒、
+  对象、曲尾）全打一遍，均不再崩溃；每次 seek 后 `__nativePause` 和应用内
+  暂停键都正常；纵向滚动不 seek，横向拖动正常，拖动后按钮仍可用；
+  `go test ./...` 全绿。
+- **合规**：提交前把 0.1.47 的修改版源码推到
+  <https://github.com/yigiaogiao/mygo-music>（`4da51ba`），商店描述里的 AGPL
+  源码地址与提交的包一致。
+- **提交记录**：0.1.47 于 2026-11-26 用 CLI 提交审核，输出
+  `The application was submitted successfully`。
+
 ## 第 6 步：审核关注点（对照自查）
 
 | 审核项 | MyGo 的情况 |
@@ -313,8 +346,8 @@ LPK 是唯一的交付物，装在微服上；手机端是「懒猫微服」客�
 - [ ] `lazycat/package.yml` 版本已递增，`cmd/server/main.go` 与 `lazycat/README.md` 对齐
 - [ ] `./scripts/build-lpk.sh` 成功，二进制是 `statically linked`
 - [ ] `lzc-cli project lint` 无 error
-- [ ] 本机侧载 0.1.41 能打开、能播放、重启后数据还在；两台设备能互相接力；
-      实验性功能打开后刷新/重开仍保持
+- [ ] 本机侧载 0.1.47 能打开、能播放、重启后数据还在；两台设备能互相接力；
+      实验性功能打开后刷新/重开仍保持；手机拖动进度条后按钮正常，锁屏按钮正常
 - [ ] 开发者中心：图标 + 中英文各自的描述/关键词/来源
 - [ ] **每个语言都勾选适用平台并上传截图**（桌面 ≥2、手机 ≥3）
 - [ ] 网页流程：上传新版本 → 填更新说明 → 提交审核
