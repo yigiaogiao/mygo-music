@@ -10,15 +10,26 @@ import (
 	"mygo-music/internal/player"
 )
 
+// bufferingText is what the player says of the song it's on while it can't
+// play it: that it's still coming, or that it couldn't load and is asked for
+// again.
+func bufferingText(pl *player.Player) string {
+	if pl.Retrying() {
+		return T("Couldn't load. Trying again…")
+	}
+	return T("Buffering…")
+}
+
 // scrubState is a progress bar's own: the value dragged, while it is, and
 // the levels of the music its smoke follows.
 type scrubState struct {
 	v float64
 	// held is set while the pointer pressed on the bar is down, wherever
 	// it has gone since: Pressed is false off the bar, which is thin.
-	held   bool
-	active bool // dragged since the last frame, to seek once let go
-	level  barState
+	held     bool
+	active   bool // dragged since the last frame, to seek once let go
+	canceled bool // the system took the pointer: this drag seeks nowhere
+	level    barState
 }
 
 func secs(s float64) time.Duration { return time.Duration(s * float64(time.Second)) }
@@ -43,18 +54,27 @@ func (a *app) scrubber(c *ui.Context, st *scrubState, track, fill ui.Color, heig
 			st.held = ev.Button == 0
 		case ui.InputPointerUp:
 			st.held = false
+			if ev.Canceled {
+				// The system took the pointer, as a scroll does: the drag
+				// seeks nowhere, and what shows goes back to where the
+				// song is.
+				st.active, st.canceled = false, true
+			}
 		}
 		return false
 	})
 	pressed := st.held
 	switch {
 	case pressed:
-		st.active = true
+		st.active, st.canceled = true, false
 	case st.active:
 		// Let go: there, but not right at the end, which would end the
 		// song as it begins to play.
 		st.active = false
 		pl.Seek(secs(min(st.v, max(0, dur-1))))
+	case st.canceled:
+		// The press was taken back, and the value went with it: no seek.
+		st.canceled = false
 	case s.Changed():
 		pl.Seek(secs(min(st.v, max(0, dur-1))))
 	}
@@ -377,7 +397,7 @@ func (a *app) playerBar(c *ui.Context) {
 	// The controls keep the middle, between sides that share what is left:
 	// narrower, the middle gives up to 140 DIPs, and what plays keeps room
 	// for its cover, some of its title and its heart.
-	const controls = 3*32 + 2*4 // lyrics, queue and the speaker
+	const controls = 4*32 + 3*4 // devices, lyrics, queue and the speaker
 	ui.Row(c).Absolute().Left(0).Right(0).Bottom(0).Height(playerBarHeight).PaddingX(20).Gap(20).AlignItems(ui.Center).Children(func() {
 		// What plays.
 		ui.Row(c).Grow(1).Basis(0).MinWidth(150).Children(func() {
@@ -418,7 +438,7 @@ func (a *app) playerBar(c *ui.Context) {
 					color := p.muted
 					switch {
 					case pl.Loading():
-						sub = T("Buffering…")
+						sub = bufferingText(pl)
 					case pl.Err() != "":
 						sub, color = pl.Err(), p.accent
 					}
@@ -461,6 +481,7 @@ func (a *app) playerBar(c *ui.Context) {
 			if iconButton(c.Key("queue"), iconQueue, 16, p.muted, T("Queue")).Clicked() && tr != nil {
 				a.nowPlaying, a.npPane = true, paneQueue
 			}
+			a.devicesButton(c, p.text.Alpha(0.75))
 			a.volumeButton(c, p.text.Alpha(0.75))
 		})
 	})
@@ -485,6 +506,8 @@ func (a *app) compactPlayerBar(c *ui.Context) {
 				})
 				ui.Text(c, T("Not Playing")).FontSize(13).TextColor(p.muted)
 			})
+			// Nothing plays here, but another device may: this takes it over.
+			a.devicesButton(c, p.muted)
 			return
 		}
 		info := ui.ButtonBase(c.Key("info")).Grow(1).Basis(0).MinWidth(0).Gap(10).AlignItems(ui.Center).FocusRing(false).Label(T("Open Now Playing"))
@@ -503,7 +526,7 @@ func (a *app) compactPlayerBar(c *ui.Context) {
 				color := p.muted
 				switch {
 				case pl.Loading():
-					sub = T("Buffering…")
+					sub = bufferingText(pl)
 				case pl.Err() != "":
 					sub, color = pl.Err(), p.accent
 				}
@@ -518,6 +541,7 @@ func (a *app) compactPlayerBar(c *ui.Context) {
 			a.nowPlaying = true
 		}
 		a.likeButton(c.Key("like"), tr, 16, p.muted).Shrink(0)
+		a.devicesButton(c, p.muted)
 		if playButton(c.Key("play"), pl.Playing(), 18, p.text).Clicked() {
 			pl.TogglePlay()
 		}

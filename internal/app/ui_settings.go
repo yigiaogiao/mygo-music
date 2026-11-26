@@ -253,7 +253,11 @@ func (a *app) settingsSheet(c *ui.Context) {
 	ui.Box(c.Key("settings-sheet")).Absolute().Top(0).Left(0).Right(0).Bottom(0).Background(p.bg).Children(func() {
 		header := ui.Row(c.Key("header")).Absolute().Top(0).Left(0).Right(0).Height(top).Padding(0, 14, 0, 14).Gap(8).AlignItems(ui.Center).DragWindow()
 		header.Children(func() {
-			if backButton(c.Key("back"), p.muted, p.hover, T("Back")).Clicked() {
+			if mobile {
+				if navBackButton(c.Key("back"), p.muted, T("Back")).Clicked() {
+					a.settingsOpen = false
+				}
+			} else if backButton(c.Key("back"), p.muted, p.hover, T("Back")).Clicked() {
 				a.settingsOpen = false
 			}
 			ui.Text(c, T("Settings")).FontSize(15).FontWeight(700).SingleLine().Shrink(1).MinWidth(0)

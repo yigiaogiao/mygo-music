@@ -10,7 +10,9 @@ import (
 	"math/cmplx"
 	"net/http"
 	"os"
+	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/egoist/mygo/audio"
@@ -87,50 +89,110 @@ func opened(f *os.File, size int64) *download {
 	return d
 }
 
+// A song that stops coming is asked for again from where it stopped: a
+// phone's network may go for a moment, and asking for the rest plays the song
+// on from there, rather than losing it.
+const (
+	resumeWait = 500 * time.Millisecond
+	maxResume  = 3
+)
+
+// stallAfter is how long a body may send nothing before what fetches it asks
+// for the rest: tests shorten it.
+var stallAfter = 15 * time.Second
+
+// errStalled says a body stopped coming, which is reason enough to ask for
+// the rest of it.
+var errStalled = errors.New("player: the download stalled")
+
 func (d *download) run(ctx context.Context, url string, headers map[string]string) {
 	defer d.release()
-	finish := func(err error) {
-		d.mu.Lock()
-		d.done, d.err = true, err
-		d.cond.Broadcast()
-		d.mu.Unlock()
+	for tries := 0; ; tries++ {
+		// Only run writes n, so it can read it with no lock.
+		from := d.n
+		err := d.fetch(ctx, url, headers)
+		if err == nil {
+			// Whole if as long as promised: the cache's.
+			if d.part != "" && (d.size <= 0 || d.n == d.size) {
+				d.hand()
+			}
+			d.finish(nil)
+			return
+		}
+		// What came in is kept: what's missing is asked for, unless nothing
+		// came at all, or the stream is let go.
+		if ctx.Err() != nil || tries >= maxResume || d.n == from {
+			d.finish(err)
+			return
+		}
+		time.Sleep(resumeWait)
 	}
+}
+
+// finish says the song is all in, or why it isn't, and wakes its readers.
+func (d *download) finish(err error) {
+	d.mu.Lock()
+	d.done, d.err = true, err
+	d.cond.Broadcast()
+	d.mu.Unlock()
+}
+
+// fetch reads the song into it from where it has come in, and returns once all
+// of it is in, or nothing more comes: the reason it stopped, or errStalled for
+// a body that stopped coming, which is asked for again.
+func (d *download) fetch(ctx context.Context, url string, headers map[string]string) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
-		finish(err)
-		return
+		return err
 	}
 	req.Header.Set("User-Agent", music.Agent)
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
+	if d.n > 0 {
+		req.Header.Set("Range", "bytes="+strconv.FormatInt(d.n, 10)+"-")
+	}
+	// A request that sends nothing for a while — not even its head — is cut,
+	// and asked for again: a phone's network may go behind a connection that
+	// stays open, and waiting on it forever leaves the song buffering with
+	// nobody asking for it again.
+	var stalled atomic.Bool
+	watch := time.AfterFunc(stallAfter, func() { stalled.Store(true); cancel() })
+	defer watch.Stop()
 	res, err := music.HeadersStay(http.DefaultClient, req.URL.Hostname(), headers).Do(req)
 	if err != nil {
-		finish(err)
-		return
+		if stalled.Load() {
+			return errStalled
+		}
+		return err
 	}
 	defer res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		finish(errors.New(res.Status))
-		return
+	watch.Reset(stallAfter)
+	switch {
+	case d.n == 0 && res.StatusCode == http.StatusOK:
+	case d.n > 0 && res.StatusCode == http.StatusPartialContent:
+	default:
+		// A server that won't give the rest from where it stopped is no use
+		// to a song that came in part.
+		return errors.New(res.Status)
 	}
 	buf := make([]byte, 64<<10)
 	for {
 		n, err := res.Body.Read(buf)
 		if n > 0 {
+			watch.Reset(stallAfter)
 			d.write(buf[:n])
 		}
 		if err == io.EOF {
-			// Whole if as long as promised: the cache's.
-			if d.part != "" && (d.size <= 0 || d.n == d.size) {
-				d.hand()
-			}
-			finish(nil)
-			return
+			return nil
+		}
+		if stalled.Load() {
+			return errStalled
 		}
 		if err != nil {
-			finish(err)
-			return
+			return err
 		}
 	}
 }

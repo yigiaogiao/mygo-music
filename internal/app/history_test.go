@@ -8,6 +8,29 @@ import (
 	"mygo-music/internal/music"
 )
 
+// A phone's back gesture goes back one level at a time, so the page's
+// history is kept as deep as the app is: a page behind, Now Playing, the
+// settings and the drawer each count for one.
+func TestHistoryDepth(t *testing.T) {
+	a := newTestApp()
+	if got := a.historyDepth(true); got != 0 {
+		t.Errorf("at the root, depth is %d", got)
+	}
+	a.history = []route{{page: pageStations}}
+	if got := a.historyDepth(true); got != 1 {
+		t.Errorf("a page behind, depth is %d", got)
+	}
+	a.nowPlaying = true
+	a.settingsOpen = true
+	a.navOpen = true
+	if got := a.historyDepth(false); got != 3 {
+		t.Errorf("page, Now Playing and settings, depth is %d", got)
+	}
+	if got := a.historyDepth(true); got != 4 {
+		t.Errorf("with the drawer open on a phone, depth is %d", got)
+	}
+}
+
 // The side buttons of a mouse go back and forward between pages.
 func TestBackAndForward(t *testing.T) {
 	a := newTestApp()

@@ -184,6 +184,7 @@ func (a *app) boot() {
 	a.keepCheckingPlugins()
 	a.startLibrary(a.library)
 	a.restoreSession()
+	a.startHandoff()
 	if a.local != nil {
 		a.local.Rescan()
 	}

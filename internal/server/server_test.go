@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"mygo-music/internal/local"
+	"mygo-music/internal/music"
 )
 
 func testServer(t *testing.T) *Server {
@@ -152,6 +153,64 @@ func TestMediaServesOnlyAllowed(t *testing.T) {
 	}
 	if rec := serve("asset", s.token("audio", file), ""); rec.Code != http.StatusNotFound {
 		t.Errorf("token used for another kind: code %d", rec.Code)
+	}
+}
+
+// A song is served by its ID too, for a page that plays it with a media
+// element: the element fetches the URL itself, with Range, as it plays.
+func TestTrackServesByID(t *testing.T) {
+	s := testServer(t)
+	folder := t.TempDir()
+	file := filepath.Join(folder, "song.mp3")
+	if err := os.WriteFile(file, []byte("ID3-test-bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s.local.AddFolders(folder)
+	var id string
+	for deadline := time.Now().Add(20 * time.Second); id == ""; {
+		if time.Now().After(deadline) {
+			t.Fatal("the scan never listed the song")
+		}
+		res, err := s.local.Search("", music.SearchTracks, 0)
+		if err == nil && len(res.Tracks) > 0 {
+			id = res.Tracks[0].ID
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	get := func(p, rng string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, p, nil)
+		if rng != "" {
+			req.Header.Set("Range", rng)
+		}
+		rec := httptest.NewRecorder()
+		s.track(rec, req)
+		return rec
+	}
+
+	rec := get("/api/track/"+id, "bytes=0-2")
+	if rec.Code != http.StatusPartialContent {
+		t.Fatalf("range request: code %d", rec.Code)
+	}
+	if got := rec.Body.String(); got != "ID3" {
+		t.Errorf("range body %q", got)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "audio/mpeg" {
+		t.Errorf("content type %q", ct)
+	}
+
+	// Only the IDs the library has: a path, or one it never listed, is
+	// nothing to serve.
+	for _, p := range []string{"/api/track/", "/api/track/nonesuch", "/api/track/" + id + "/x"} {
+		if rec := get(p, ""); rec.Code != http.StatusNotFound {
+			t.Errorf("%s: code %d", p, rec.Code)
+		}
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/track/"+id, nil)
+	rec = httptest.NewRecorder()
+	s.track(rec, req)
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("POST: code %d", rec.Code)
 	}
 }
 

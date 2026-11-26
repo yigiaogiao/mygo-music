@@ -393,7 +393,7 @@ func (a *app) nowPlayingBody(c *ui.Context, tr *music.Track, art *artwork, accen
 					ui.Spacer(c)
 					status := "-" + clock(pl.Duration()-pl.Position())
 					if pl.Loading() {
-						status = T("Buffering…")
+						status = bufferingText(pl)
 					}
 					ui.Text(c, status).FontSize(11).FontFeatures("tnum").TextColor(white.Alpha(0.5))
 				})
@@ -458,7 +458,7 @@ func (a *app) nowPlayingCompact(c *ui.Context, tr *music.Track, art *artwork, ac
 	}
 	ui.Column(c).Absolute().Top(0).Left(0).Right(0).Bottom(0).Padding(topBar(c)+2, pad, 10, pad).Children(func() {
 		ui.Row(c).Height(28).AlignItems(ui.Center).Children(func() {
-			if backButton(c.Key("back"), white.Alpha(0.78), ui.RGBA(255, 255, 255, 0.1), T("Back")).Clicked() {
+			if navBackButton(c.Key("back"), white.Alpha(0.78), T("Back")).Clicked() {
 				a.nowPlaying = false
 			}
 		})
@@ -486,7 +486,7 @@ func (a *app) nowPlayingCompact(c *ui.Context, tr *music.Track, art *artwork, ac
 			ui.Spacer(c)
 			status := "-" + clock(pl.Duration()-pl.Position())
 			if pl.Loading() {
-				status = T("Buffering…")
+				status = bufferingText(pl)
 			}
 			ui.Text(c, status).FontSize(11).FontFeatures("tnum").TextColor(white.Alpha(0.5))
 		})

@@ -40,6 +40,10 @@ type Player struct {
 	// Normalize reports whether to even out the loudness of tracks, as
 	// the settings say.
 	Normalize func() bool
+	// Hidden reports whether the app is out of sight, as on a phone in a
+	// pocket, where a track that can't load is waited for rather than
+	// skipped: the listener can't see the queue go by. If nil, it's in sight.
+	Hidden func() bool
 	// Cache keeps the songs played, if set.
 	Cache *Cache
 	// Changed, if set, hears that what plays, where it is or whether it
@@ -62,7 +66,7 @@ type Player struct {
 	awaiting bool // at the queue's end, for what the feed gives
 
 	track   *music.Track
-	out     *audio.Player
+	out     sink
 	stream  stream
 	watch   *watched      // stream, as out plays it
 	info    *music.Stream // what the current track streams
@@ -72,6 +76,17 @@ type Player struct {
 	playing bool // what the listener wants: false while paused
 	err     string
 	gen     int // counts loads, to drop the results of stale ones
+
+	// A track that couldn't load is asked for again after a wait, rather
+	// than skipped at once: the network may be back by then. These are how
+	// many times it has been asked for since it was picked, how the load
+	// that failed was going, and whether the next load is one asked for
+	// again, whose failures count on.
+	failN    int
+	failSkip int
+	failDir  int
+	retrying bool
+	waiting  bool // asked for again, once the wait is over
 
 	lyrics       []lyrics.Line
 	lyricsLoaded bool
@@ -365,12 +380,21 @@ func (p *Player) Queue() []music.Track { return p.queue }
 // Playing reports what the listener wants: false while paused.
 func (p *Player) Playing() bool { return p.playing }
 
-// Loading reports whether the current track is still loading.
-// Loading reports whether the current track is on its way: loading, or
-// waiting for the next of its bytes, after a seek past what has come in.
+// Loading reports whether the current track is on its way: loading, waiting to
+// be asked for again after a failure, or waiting for the next of its bytes,
+// after a seek past what has come in.
 func (p *Player) Loading() bool {
-	return p.loading || p.awaiting || p.watch != nil && p.watch.starved()
+	if p.loading || p.waiting || p.awaiting || p.watch != nil && p.watch.starved() {
+		return true
+	}
+	// A phone's media element says it itself: it may wait for the file long
+	// after the player has handed it over.
+	return p.out != nil && p.out.Buffering()
 }
+
+// Retrying reports whether the current track couldn't load, and is waited for
+// before it's asked for again.
+func (p *Player) Retrying() bool { return p.waiting }
 
 // Ready reports whether the current track has loaded, to play.
 func (p *Player) Ready() bool { return p.out != nil || p.remote != nil && p.remote.started }
@@ -454,11 +478,16 @@ func (p *Player) TogglePlay() {
 		case p.loading:
 			// It plays once loaded, or not.
 			p.playing = !p.playing
-			p.sync()
+		case p.playing:
+			// Paused while it waits to play, as after a failed load: it
+			// stays quiet when it comes, not playing to an empty room.
+			p.playing = false
 		case len(p.order) > 0:
 			// Again, as for a track that couldn't play.
 			p.loadSkipping(max(p.at, 0), 0, stay, true, p.pending)
+			return
 		}
+		p.sync()
 		return
 	}
 	out := p.out
@@ -505,6 +534,15 @@ func (p *Player) Seek(t time.Duration) {
 		return
 	}
 	out := p.out
+	// The page's element jumps at once: pauses and timers around it would
+	// only make a lock screen's seek late.
+	if s, ok := out.(instantSeeker); ok {
+		p.seekGen++
+		p.seeking = false
+		s.SeekInstant(t)
+		p.sync()
+		return
+	}
 	// One past what has come in waits for it: a frame once that would show.
 	p.after(seekGap+starvedAfter+20*time.Millisecond, func() { p.post(func() {}) })
 	// Paused, it jumps at once; but a seek on its way paused it only for
@@ -666,6 +704,13 @@ func (p *Player) record() {
 func (p *Player) loadSkipping(at, skipped, dir int, play bool, from time.Duration) {
 	t := p.queue[p.order[at]]
 	src := p.sourceOf(&t)
+	if !p.retrying {
+		// Picked, or gone on to: its failures start over.
+		p.failN = 0
+	}
+	p.retrying = false
+	// Whatever was asked for again is this load's now.
+	p.waiting = false
 	if was := p.remote; was != nil && was.started && p.playing && (src == nil || src.Info().ID != was.src.Info().ID) {
 		// Whatever plays next isn't its to play.
 		p.command(was.src, was.src.RemotePause)
@@ -689,6 +734,15 @@ func (p *Player) loadSkipping(at, skipped, dir int, play bool, from time.Duratio
 		p.loadRemote(gen, src, at, skipped, dir, play, from)
 		return
 	}
+	// On a phone the browser fetches and plays the file itself, which keeps it
+	// going with the screen off: nothing is downloaded or decoded here, and a
+	// track that changes is no more than a new source for the element.
+	if elementSinkFor != nil {
+		if out, ok := elementSinkFor(src, t); ok {
+			p.playElement(out, t, gen, at, skipped, dir, play, from)
+			return
+		}
+	}
 	quality := music.Qualities[len(music.Qualities)/2]
 	if p.Quality != nil {
 		quality = p.Quality()
@@ -711,7 +765,7 @@ func (p *Player) loadSkipping(at, skipped, dir int, play bool, from time.Duratio
 			p.stream, p.info = s, info
 			p.gain = normGain(info)
 			p.watch = &watched{stream: s, now: p.now, ended: func() { p.post(func() {}) }}
-			p.out = audio.NewPlayer(p.watch)
+			p.out = decoded{audio.NewPlayer(p.watch)}
 			// From its middle, as a session picked up again, it fades in.
 			level := 1.0
 			if p.pending > 0 {
@@ -739,6 +793,51 @@ func (p *Player) loadSkipping(at, skipped, dir int, play bool, from time.Duratio
 			p.getAhead(quality)
 		})
 	}()
+}
+
+// playElement plays the track t that the page's media element out has, as on a
+// phone: the browser fetches and decodes the file, and the player follows it as
+// it would the audio it decodes itself.
+func (p *Player) playElement(out sink, t music.Track, gen, at, skipped, dir int, play bool, from time.Duration) {
+	p.loading = false
+	p.stream, p.info, p.watch = nil, nil, nil
+	p.out = out
+	// Its loudness tags aren't known here, without a call for them: it plays
+	// as the file has it.
+	p.gain = 1
+	// From its middle, as a session picked up again, it fades in.
+	level := 1.0
+	if from > 0 {
+		level = 0
+	}
+	p.fade.attach(out, level)
+	p.applyGain()
+	out.OnEnd(func() {
+		p.post(func() {
+			if gen == p.gen {
+				p.ended()
+			}
+		})
+	})
+	out.OnError(func(err error) {
+		p.post(func() {
+			if gen != p.gen {
+				return
+			}
+			p.stop()
+			p.loadFailed(t.Source, err, at, skipped, dir)
+		})
+	})
+	if from > 0 {
+		out.Seek(from)
+		p.pending = 0
+	}
+	if play {
+		out.Play()
+		p.fade.fade(1, fadeIn, nil)
+		p.record()
+	}
+	p.sync()
 }
 
 // loadCover shows the system the cover of t, once it has it.
@@ -780,7 +879,10 @@ func (p *Player) loadLyrics(gen int, src music.Source, t music.Track) {
 
 // loadFailed says why the track at order[at] can't play, and skips it the way
 // dir goes, unless it stays, nothing in the queue can play, or the listener has
-// to do something first, which would stop the next track too.
+// to do something first, which would stop the next track too. One that failed
+// for a moment is asked for again first: a phone whose screen went off may have
+// lost the network for a while, and skipping through the queue then left the
+// listener with nothing but the buffering it showed.
 func (p *Player) loadFailed(source string, err error, at, skipped, dir int) {
 	p.err = errorText(err)
 	if errors.Is(err, music.ErrSignIn) || errors.Is(err, music.ErrSetup) {
@@ -789,6 +891,9 @@ func (p *Player) loadFailed(source string, err error, at, skipped, dir int) {
 			p.Failed(source, err)
 		}
 		p.sync()
+		return
+	}
+	if p.retryFailed(err, at, skipped, dir) {
 		return
 	}
 	if dir != stay && skipped+1 < len(p.order) {
@@ -800,6 +905,74 @@ func (p *Player) loadFailed(source string, err error, at, skipped, dir int) {
 	p.sync()
 }
 
+// retryDelays are how long a track that couldn't load waits before it's asked
+// for again: a moment's failure, then longer, as long as it may take a phone
+// to get its network back.
+var retryDelays = []time.Duration{
+	time.Second, 2 * time.Second, 4 * time.Second,
+	8 * time.Second, 15 * time.Second, 30 * time.Second,
+}
+
+// retryable reports whether a load that failed with err may work later: all
+// but what the source says can't play as it is.
+func retryable(err error) bool {
+	switch {
+	case errors.Is(err, errNoSource), errors.Is(err, music.ErrUnavailable),
+		errors.Is(err, music.ErrUnsupported), errors.Is(err, music.ErrSignIn),
+		errors.Is(err, music.ErrSetup):
+		return false
+	}
+	return true
+}
+
+// retryFailed asks for the track at order[at] again after a wait, and reports
+// whether it will. Out of sight it goes on asking, however long the network
+// takes: skipping songs then is skipping them where the listener can't see it.
+// In sight, it asks a few times, then lets the queue go on.
+func (p *Player) retryFailed(err error, at, skipped, dir int) bool {
+	if !retryable(err) {
+		return false
+	}
+	hidden := p.Hidden != nil && p.Hidden()
+	if !hidden && p.failN >= len(retryDelays) {
+		return false
+	}
+	p.failSkip, p.failDir = skipped, dir
+	delay := retryDelays[min(p.failN, len(retryDelays)-1)]
+	p.failN++
+	p.waiting = true
+	gen := p.gen
+	p.sync()
+	p.after(delay, func() {
+		p.post(func() {
+			if gen != p.gen || !p.waiting {
+				return
+			}
+			p.retrying = true
+			p.loadSkipping(at, skipped, dir, p.playing, 0)
+		})
+	})
+	return true
+}
+
+// RetryNow asks again for what waits to be asked for again, and starts the
+// current track's load over if it's still under way, as when the app comes back
+// into sight: the network may be back with it, and a load begun out of sight
+// may be waiting on a connection that went with the page.
+func (p *Player) RetryNow() {
+	if p.at < 0 || len(p.order) == 0 {
+		return
+	}
+	switch {
+	case p.waiting:
+		p.failN = 0
+		p.retrying = true
+		p.loadSkipping(max(p.at, 0), p.failSkip, p.failDir, p.playing, 0)
+	case p.loading:
+		p.loadSkipping(max(p.at, 0), 0, forward, p.playing, p.pending)
+	}
+}
+
 // errorText says what went wrong with a track, in the listener's terms where
 // the source's error is one the app knows.
 func errorText(err error) string {
@@ -808,6 +981,8 @@ func errorText(err error) string {
 		return i18n.T("The plugin of this song is gone")
 	case errors.Is(err, music.ErrUnavailable):
 		return i18n.T("This song isn't available")
+	case errors.Is(err, errUnplayable):
+		return i18n.T("This song's format can't be played here")
 	case errors.Is(err, music.ErrSignIn):
 		return i18n.T("Sign in to play this song")
 	case errors.Is(err, music.ErrSetup):

@@ -39,6 +39,9 @@ var (
 	iconDown      = strokeIcon(`<path d="m6 9 6 6 6-6"/>`)
 	iconMenu      = strokeIcon(`<path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/>`)
 	iconBack      = strokeIcon(`<path d="m15 18-6-6 6-6"/>`)
+	// iconChevron is the way back alone, drawn lighter for a phone's header,
+	// where it sits without a word beside it.
+	iconChevron   = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>`))
 	iconForward   = strokeIcon(`<path d="m9 18 6-6-6-6"/>`)
 	iconNote      = strokeIcon(`<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>`)
 	iconHeart     = strokeIcon(`<path d="M19 14c1.5-1.5 3-3.2 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.8 0-3 .5-4.5 2-1.5-1.5-2.7-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4 3 5.5l7 7z"/>`)
@@ -95,6 +98,8 @@ var (
 	iconUpDown   = strokeIcon(`<path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/>`)
 	iconPlug     = strokeIcon(`<path d="M12 22v-5M9 8V2M15 8V2M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8z"/>`)
 	iconLaptop   = strokeIcon(`<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M2 20h20M9 4v1.5a1.5 1.5 0 0 0 1.5 1.5h3A1.5 1.5 0 0 0 15 5.5V4"/>`)
+	iconDevices  = strokeIcon(`<rect x="2" y="4" width="13" height="10" rx="2"/><path d="M6.5 19h5"/><path d="M9 14v5"/><rect x="17" y="8" width="5" height="12" rx="1.5"/><path d="M19 17.5h1"/>`)
+	iconPhone    = strokeIcon(`<rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M10.5 18.5h3"/>`)
 	iconDatabase = strokeIcon(`<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5M3 12a9 3 0 0 0 18 0"/>`)
 	iconFlask    = strokeIcon(`<path d="M9 3h6M10 3v6.5L4.6 18.2A2 2 0 0 0 6.3 21h11.4a2 2 0 0 0 1.7-2.8L14 9.5V3M7.5 15h9"/>`)
 	iconRefresh  = strokeIcon(`<path d="M21 12a9 9 0 1 1-2.64-6.36L21 8M21 3v5h-5"/>`)

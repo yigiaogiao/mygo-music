@@ -9,7 +9,7 @@
 
 | 材料 | 文件 |
 | --- | --- |
-| 安装包 | `lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.39.lpk`（构建后生成） |
+| 安装包 | `lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.44.lpk`（构建后生成） |
 | 图标 | `lazycat/icon.png`（512×512 PNG，约 190 KB） |
 | 桌面截图 | `lazycat/store/screenshots/pc/01-home.png` … `04-settings.png`（1920×1080，16:9） |
 | 手机截图 | `lazycat/store/screenshots/mobile/01-home.png` … `04-now-playing.png`（720×405，16:9） |
@@ -29,7 +29,7 @@ cd ~/orca/projects/mygo-music
 
 ```bash
 ~/.local/share/lzctools/node_modules/.bin/lzc-cli lpk info \
-  lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.39.lpk
+  lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.44.lpk
 ```
 
 重点确认：`package`、`version`、`icon` 都在，镜像只有官方运行时
@@ -155,7 +155,7 @@ LPK 是唯一的交付物，装在微服上；手机端是「懒猫微服」客�
 
 ```bash
 ~/.local/share/lzctools/node_modules/.bin/lzc-cli appstore pre-publish \
-  lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.39.lpk \
+  lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.44.lpk \
   -c "首个版本，验证安装、播放和歌词"
 ```
 
@@ -168,7 +168,7 @@ LPK 是唯一的交付物，装在微服上；手机端是「懒猫微服」客�
 
 ```bash
 ~/.local/share/lzctools/node_modules/.bin/lzc-cli appstore publish \
-  lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.39.lpk \
+  lazycat/dist/cloud.lazycat.app.mygomusic-v0.1.44.lpk \
   --clangs=zh:lazycat/store/changelog.zh-CN.txt \
   --clangs=en:lazycat/store/changelog.en-US.txt
 ```
@@ -202,6 +202,93 @@ LPK 是唯一的交付物，装在微服上；手机端是「懒猫微服」客�
   审核通过（审核单 22995）。但应用 `status` 仍是 `0`（已下架）——审核通过不会自动
   恢复上架，需要联系审核/运营把应用重新上架（审核原话"后续修复了bug再给您上架"）。
 
+## 跨设备接力（2026-11-20，0.1.40）
+
+- **场景**：电脑上正在放歌，拿起手机打开 MyGo 音乐，点一下就能接着放；电脑在
+  约 1 秒内自动暂停，手机上从同一秒继续，队列、随机和循环都带过去。
+- **身份**：懒猫网关给每个客户端注入 `X-HC-Device-ID`（**同一账号的每台设备
+  不同**），服务端拿它区分设备，不需要登录或配对。网关没有注入时依次退回
+  `X-MyGo-Device`、`?device=`、cookie `mygo_music_device`，所以本机开发、
+  浏览器直连和旧客户端也能用。API Auth Token 模式下网关不注入这些头。
+- **会话**：多实例让每个用户有独立容器，服务端因此可以在本容器里保存「谁在放、
+  放哪首、到第几秒、队列」。设备列表单独存 `DataDir/playback.json`，手机没开
+  应用时也会出现在列表里；会话本身只在内存里，容器重启就丢。
+- **流程**：
+  1. 播放中的设备每秒上报位置（暂停时每 2 秒），换歌或开始播放时用 `claim`
+     取得会话。
+  2. A 点设备列表里的手机 → 服务端记下「等手机接力」，A 继续放，不中断。
+  3. 手机下次轮询看到等待 → 弹「在此设备上继续播放」→ 点「在此播放」→ 恢复
+     队列并从当前秒数开始 `claim`；A 下一次轮询发现会话已换人，自动暂停。
+  4. 手机也可以不等 A 发起，直接点设备列表里的「在此设备继续播放」把会话拉过来。
+- **限制**：手机必须已经打开应用（或 10 分钟内打开过，等待不会自动推送/唤醒），
+  且接力按钮需要用户点一下，浏览器不允许后台自动出声。两端会有约 0.5–2 秒重叠。
+- **测试**：本机起服务，用两个独立的浏览器上下文（桌面 1180×780、手机 390×844
+  且 UA 带 iPhone）验证：A 播放 → B 出现 → B 接力 → A 暂停；A 再拉回 → A 发起
+  → B 弹窗点「在此播放」→ A 暂停。`/api/playback` 返回的 `owner` 用来确认状态。
+  该流程在 0.1.40 构建上实测通过；用户也在真机（电脑客户端 + 手机）和手机
+  浏览器上实测通过。浏览器端身份走 cookie `mygo_music_device`，无痕模式会每次
+  变成新设备，测试时别用无痕窗口。
+- **提交记录**：0.1.40 于 2026-11-21 用 CLI 提交审核，更新日志以跨设备接力为
+  首条重点，中英文各一份；输出 `The application was submitted successfully`。
+
+## 实验性设置不保存（2026-11-25，0.1.41）
+
+- **现象**：在手机/浏览器里打开「设置 → 实验性功能 → 烟雾背景」，下次打开应用
+  又变回关闭；刷新页面也一样。桌面客户端没有这个问题。
+- **根因**：MyGo 是桌面优先的应用，设置写 `PathUserData/settings.json`。浏览器
+  （WebView）里没有 `PathUserData`，`settingsPath()` 直接报错，`save()` 看到
+  `path == ""` 就返回了；整个 Web 版原本只把音量单独存进 `localStorage`，
+  其余设置刷新即丢。这是上游框架在 Web 端的既有缺口，不是懒猫网关的问题。
+- **修法**（0.1.41）：新增 `settings_store.go` / `settings_store_js.go` 两个
+  平台文件。没有设置文件时（浏览器）从 `localStorage` 的
+  `mygo-music.settings` 读取整份设置，保存也写回那里；桌面端仍读写
+  `settings.json`，行为不变。`localStorage` 按应用 origin 保存，应用升级、
+  刷新页面都不会丢；清除站点数据或换浏览器才会重置。
+- **注意**：Web 端设置按浏览器/设备各存一份（和音量一致），不会跨设备同步；
+  无痕模式关闭即丢。若以后要求跨设备同步，需要把设置挪到服务端
+  `/api/settings`，这是另一项改动。
+- **验证**：Playwright 打开 0.1.41 的 Web 版 → 设置 → 实验性功能 → 打开
+  「烟雾背景」→ `localStorage['mygo-music.settings']` 里 `fog:true` → 刷新页面
+  再进设置，开关仍为开。桌面端 `go test ./...` 通过。
+- **提交记录**：0.1.41 于 2026-11-25 用 CLI 提交审核，更新日志继续以跨设备接力
+  为首条重点，并加上实验性设置不丢失的修复说明；输出
+  `The application was submitted successfully`。
+
+## 息屏断网无声连切 / 换歌一直缓冲（2026-11-25，0.1.43–0.1.44）
+
+- **现象**：0.1.42 上锁屏/息屏后，上一首放完，下一首没有声音，界面一直显示
+  「正在缓冲」，并且不断跳歌；用锁屏或通知栏的控制按钮切歌同样无声。开屏后
+  恢复正常。0.1.43 加了失败重试后不再跳歌，但用户实测又变成 `一首歌放了就不能
+  再放`：一直停在「正在缓冲」，连解锁也不恢复。
+- **根因**：手机进入后台后，Android 客户端可能被系统限制网络（官方文档
+  「安卓平台后台常住」要求用户允许客户端后台运行和后台流量）。当前歌的整个
+  文件早在播放前就下载进内存，所以能正常放完；换歌时 `POST /api/call` 的
+  Stream 调用或音频 GET 失败。0.1.42 的失败策略是立刻跳下一首（无声连切）；
+  0.1.43 改成退避重试后，**卡死的是请求本身**：连接已经建立但网络没了，请求
+  既不发数据也不报错，而 15 秒看门狗只覆盖「已拿到响应头之后的读取」，`Do`
+  阶段可以无限挂起。加载一直没有失败，重试策略就永远不会触发，`正在缓冲`
+  也就永远显示，解锁后同样挂在原来的请求上。
+- **修法**：
+  1. `internal/player/stream.go`（0.1.44）：看门狗从**发起请求**就计时，
+     15 秒拿不到任何响应（包括响应头）就取消并返回「stalled」，由下载层当作
+     可重试失败；拿到数据后每次读到字节都重置计时，已有数据时带 `Range`
+     续传（最多 3 次）。
+  2. `internal/player/player.go`（0.1.43–0.1.44）：加载失败先原地重试，退避
+     1/2/4/8/15/30 秒；`Hidden`（`document.hidden`）为真时无限重试，前台最多
+     6 次后才跳过。`RetryNow` 除了重试等待中的歌，还会把**仍卡在加载中**的歌
+     直接重新发起（新的一次 Stream + 下载），所以解锁后不必等旧请求超时。
+  3. `internal/app/visibility_js.go`：监听 `visibilitychange`，页面回到可见时
+     立即调用 `RetryNow`。
+  4. 0.1.44 起等待重试时播放条显示「加载失败，正在重试…」，与正常的
+     「正在缓冲…」区分，用户/审核能直接看出是网络在重试。
+- **给用户的说明**：如果仍出现，请检查手机系统设置里「懒猫微服」客户端的
+  后台运行和后台流量（不同厂商叫法不同：允许后台活动、允许后台数据、
+  电池不优化等）。这是官方文档写明的客户端限制，应用侧只能做到不丢队列、
+  请求不死等、解锁后立即恢复。
+- **验证**：`go test ./internal/player/`（新增 `retry_test.go`、`resume_test.go`，
+  含「服务器一直不回响应头」和「卡住的加载在回前台时重开」两个用例）；
+  `GOOS=js GOARCH=wasm go build ./...`；LPK 侧载后息屏跨过至少两次换歌再解锁。
+
 ## 第 6 步：审核关注点（对照自查）
 
 | 审核项 | MyGo 的情况 |
@@ -226,7 +313,8 @@ LPK 是唯一的交付物，装在微服上；手机端是「懒猫微服」客�
 - [ ] `lazycat/package.yml` 版本已递增，`cmd/server/main.go` 与 `lazycat/README.md` 对齐
 - [ ] `./scripts/build-lpk.sh` 成功，二进制是 `statically linked`
 - [ ] `lzc-cli project lint` 无 error
-- [ ] 本机侧载 0.1.39 能打开、能播放、重启后数据还在
+- [ ] 本机侧载 0.1.41 能打开、能播放、重启后数据还在；两台设备能互相接力；
+      实验性功能打开后刷新/重开仍保持
 - [ ] 开发者中心：图标 + 中英文各自的描述/关键词/来源
 - [ ] **每个语言都勾选适用平台并上传截图**（桌面 ≥2、手机 ≥3）
 - [ ] 网页流程：上传新版本 → 填更新说明 → 提交审核

@@ -124,18 +124,29 @@ func jsSetup(ahead time.Duration) error {
 		}
 		return nil
 	}))
-	// The first input lets a page start audio.
+	// The first input lets a page start audio; so does the page coming
+	// back to the front, where an output suspended behind it may wait.
 	resume := js.FuncOf(func(this js.Value, args []js.Value) any {
 		if jsContext.Get("state").String() == "suspended" && jsOpen {
 			jsContext.Call("resume")
 		}
 		return nil
 	})
-	for _, ev := range []string{"pointerdown", "keydown", "touchend"} {
+	for _, ev := range []string{"pointerdown", "keydown", "touchend", "visibilitychange"} {
 		js.Global().Call("addEventListener", ev, resume, map[string]any{"capture": true})
 	}
 	jsContext = ctx
 	return nil
+}
+
+func init() {
+	// A phone in a pocket is a hidden page, and there may be a moment
+	// between two tracks: suspending the context then, it may not resume
+	// until the listener touches the page, and the rest of the queue
+	// would play to itself. Mixing silence costs less than music missed.
+	keepOpenIdle = func() bool {
+		return !jsContext.IsUndefined() && js.Global().Get("document").Get("hidden").Bool()
+	}
 }
 
 // jsOpen is whether the output is open, which keeps the context running.

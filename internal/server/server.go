@@ -50,6 +50,7 @@ type Server struct {
 
 	secret []byte
 	mux    *http.ServeMux
+	pb     *playbackHub
 
 	// langMu serializes calls, as the language of what a source says is
 	// global.
@@ -89,6 +90,7 @@ func New(cfg Config) (*Server, error) {
 		return nil, err
 	}
 	s.secret = secret
+	s.pb = newPlaybackHub(cfg.DataDir)
 	s.local = local.New(s.library)
 	s.lyrics = lrclib.NewCache(filepath.Join(cfg.DataDir, "lyrics"))
 	s.lrclib = lrclib.New()
@@ -111,9 +113,11 @@ func (s *Server) Local() *local.Source { return s.local }
 func (s *Server) routes() {
 	s.mux.HandleFunc("/api/health", s.health)
 	s.mux.HandleFunc("/api/status", s.status)
+	s.mux.HandleFunc("/api/playback", s.playback)
 	s.mux.HandleFunc("/api/call", s.call)
 	s.mux.HandleFunc("/api/audio/", func(w http.ResponseWriter, r *http.Request) { s.media(w, r, "audio") })
 	s.mux.HandleFunc("/api/asset/", func(w http.ResponseWriter, r *http.Request) { s.media(w, r, "asset") })
+	s.mux.HandleFunc("/api/track/", s.track)
 	s.mux.HandleFunc("/api/cover/", s.cover)
 	s.mux.HandleFunc("/setup", s.setup)
 	s.mux.HandleFunc("/", s.static)

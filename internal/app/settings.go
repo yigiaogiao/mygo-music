@@ -104,6 +104,10 @@ func loadSettings() settings {
 			json.Unmarshal(b, &s)
 		}
 		s.path = path
+	} else {
+		// A browser has no user data directory: its storage is the settings'
+		// home, so that what the listener turned on is still on later.
+		loadBrowserSettings(&s)
 	}
 	return s
 }
@@ -113,6 +117,9 @@ func loadSettings() settings {
 func (s settings) save() error {
 	path := s.path
 	if path == "" {
+		// No file: a browser keeps them in its storage, as it keeps the
+		// volume, and elsewhere there is nowhere to keep them.
+		saveBrowserSettings(s)
 		return nil
 	}
 	b, err := json.MarshalIndent(s, "", "  ")

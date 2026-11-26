@@ -37,7 +37,7 @@ func (p *Player) Hold(pos time.Duration) {
 
 // Attach makes out the current track's audio, playing.
 func (p *Player) Attach(out *audio.Player) {
-	p.out = out
+	p.out = decoded{out}
 	p.playing = true
 }
 

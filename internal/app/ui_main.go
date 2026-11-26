@@ -107,12 +107,16 @@ func (a *app) view(c *ui.Context) {
 	a.playlistNameDialog(c)
 	a.deletePlaylistDialog(c)
 	a.folderPickerDialog(c)
+	a.takeoverDialog(c)
 	if a.toast != "" {
 		c.Toast(a.toast)
 		a.toast = ""
 	}
 	a.askLikes()
 	a.syncWindows()
+	// In a browser, the back gesture follows the app's levels: the page's
+	// history is kept as deep as they are, whatever opened or closed one.
+	a.syncHistory(a.mobile(c))
 }
 
 func (a *app) shortcuts(c *ui.Context) {
@@ -243,6 +247,22 @@ func (a *app) back() {
 	r := a.history[len(a.history)-1]
 	a.history = a.history[:len(a.history)-1]
 	a.show(r)
+}
+
+// historyDepth is how many levels the app is above its root: the pages gone
+// back from, and the covers over them, the drawer among them on a phone.
+func (a *app) historyDepth(mobile bool) int {
+	n := len(a.history)
+	if a.nowPlaying {
+		n++
+	}
+	if a.settingsOpen {
+		n++
+	}
+	if mobile && a.navOpen {
+		n++
+	}
+	return n
 }
 
 // goForward goes to the page back left, as the forward button of a mouse
@@ -443,9 +463,19 @@ func (a *app) pageTop(c *ui.Context) {
 		}
 		ui.Row(c).Absolute().Top(0).Left(left).Height(topBar(c)).Gap(4).AlignItems(ui.Center).Children(func() {
 			if mobile {
+				// One control at the edge, as a phone's header has: the way
+				// back once there is a page to go back to, and the drawer's
+				// button at the root.
+				if len(a.history) > 0 {
+					if navBackButton(c.Key("back"), a.pal.muted, T("Back")).Clicked() {
+						a.back()
+					}
+					return
+				}
 				if iconButton(c.Key("menu"), iconMenu, 19, a.pal.text, T("Menu")).Clicked() {
 					a.navOpen = !a.navOpen
 				}
+				return
 			}
 			if len(a.history) > 0 || len(a.forward) > 0 {
 				back := backButton(c.Key("back"), a.pal.muted, a.pal.hover, T("Back")).Disabled(len(a.history) == 0)

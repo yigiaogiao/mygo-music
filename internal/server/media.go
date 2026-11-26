@@ -10,6 +10,8 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+
+	"mygo-music/internal/music"
 )
 
 // token signs a file path for a kind of URL, so that the browser can ask for
@@ -62,6 +64,37 @@ func (s *Server) media(w http.ResponseWriter, r *http.Request, kind string) {
 		http.NotFound(w, r)
 		return
 	}
+	s.serveFile(w, r, file, kind)
+}
+
+// track serves a song by its ID, for a page that plays it with a media
+// element: the browser fetches it itself, when it plays it, as it fetches any
+// audio on a page, and the system keeps that going with the screen off.
+func (s *Server) track(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, "/api/track/")
+	if id == "" || strings.Contains(id, "/") {
+		http.NotFound(w, r)
+		return
+	}
+	st, err := s.local.Stream(id, "")
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	file, ok := music.PathOf(st.URL)
+	if !ok || !s.allowed(file) {
+		http.NotFound(w, r)
+		return
+	}
+	s.serveFile(w, r, file, "audio")
+}
+
+// serveFile serves a file the app asked for, with Range.
+func (s *Server) serveFile(w http.ResponseWriter, r *http.Request, file, kind string) {
 	f, err := os.Open(file)
 	if err != nil {
 		http.NotFound(w, r)

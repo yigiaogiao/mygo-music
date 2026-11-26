@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"mygo-music/internal/music"
 )
 
 // A folder removed in the settings has to go from the list at once, not at
@@ -69,5 +71,18 @@ func TestRemoveFolderShowsAtOnce(t *testing.T) {
 	case <-changed:
 	case <-time.After(time.Second):
 		t.Fatal("no change told after removing a folder")
+	}
+}
+
+// A track's URL at the server is plain: the page's media element fetches it
+// itself, so a track change is no call.
+func TestStreamURL(t *testing.T) {
+	s := New("http://127.0.0.1:8090/")
+	defer s.Close()
+	if got, want := s.StreamURL(music.Track{ID: "a1b/c"}), "http://127.0.0.1:8090/api/track/a1b%2Fc"; got != want {
+		t.Errorf("StreamURL = %q, want %q", got, want)
+	}
+	if got := s.StreamURL(music.Track{}); got != "" {
+		t.Errorf("StreamURL of nothing = %q", got)
 	}
 }

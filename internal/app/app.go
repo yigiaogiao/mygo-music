@@ -59,6 +59,7 @@ type app struct {
 	art   *artCache
 	pl    *player.Player
 	pal   palette
+	pb    handoff // what the listener's devices play together, in the browser
 
 	// libs are the sources, the built-in one first, and what the app has of
 	// each. The active one's is embedded: a.mine is what the active source
@@ -238,6 +239,7 @@ func (a *app) makeSources() {
 	a.local = local.New(userDataDir("local"))
 	var builtIn *library
 	webSrc := platformSource()
+	a.attachWebSource(webSrc)
 	if webSrc != nil {
 		// The browser's source is the server it came from, and the files
 		// there take the place of the built-in one.
@@ -359,6 +361,9 @@ func Run() error {
 	}
 	a.useUpdater(i18n.Resolve(loadSettings().Language, systemLanguages()))
 	mygo.App.WhenReady(func() {
+		// A phone's back gesture goes back in the page's history, which the
+		// app keeps as deep as its own levels.
+		a.installHistory()
 		a.settings = loadSettings()
 		a.settings.applyAppearance()
 		i18n.SetLanguage(i18n.Resolve(a.settings.Language, systemLanguages()))
@@ -375,6 +380,9 @@ func Run() error {
 		a.pl.Source = a.sourceByID
 		a.pl.Failed = a.sourceFailed
 		a.pl.Quality = func() string { return a.settings.Quality }
+		// Out of sight — a phone in a pocket — a track that can't load is
+		// waited for, not skipped: the queue mustn't go by unseen.
+		a.pl.Hidden = mygo.App.IsHidden
 		// Always evened out: a song with ReplayGain tags plays at the loudness
 		// measured for it, and one without is left as it is.
 		a.pl.Normalize = func() bool { return true }
@@ -417,7 +425,13 @@ func Run() error {
 		// From the menu bar alone, the Dock icon shows while the window
 		// does.
 		a.syncDock()
-		a.win.OnShow(a.syncDock)
+		// Back in sight, a track that couldn't load is asked for again at
+		// once: the network may be back with the page.
+		a.win.OnShow(func() {
+			a.syncDock()
+			a.pl.RetryNow()
+		})
+		watchSight(a.pl.RetryNow)
 		a.win.OnHide(a.syncDock)
 		// Hidden, it draws nothing for a while: what the heap took for
 		// the pages it showed goes back to the system, which Go would

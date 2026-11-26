@@ -77,6 +77,12 @@ func iconButton(c *ui.Context, icon *ui.SVG, size float32, color ui.Color, label
 	return b
 }
 
+// navBackButton is the way back alone, as a phone's header shows it: a bare
+// chevron in a finger's reach, rather than a word on a ground.
+func navBackButton(c *ui.Context, color ui.Color, label string) ui.Element {
+	return iconButton(c, iconChevron, 22, color, label)
+}
+
 // playButton is the icon button that plays and pauses, its icon turning
 // from one into the other.
 func playButton(c *ui.Context, playing bool, size float32, color ui.Color) ui.Element {

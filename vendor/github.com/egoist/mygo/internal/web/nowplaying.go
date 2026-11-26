@@ -4,6 +4,7 @@ package web
 
 import (
 	"bytes"
+	"fmt"
 	"syscall/js"
 	"time"
 
@@ -43,9 +44,22 @@ func (n nowPlaying) Set(info *platform.NowPlayingInfo) {
 		for _, a := range mediaActions {
 			cmd := a.cmd
 			mediaHandlers = append(mediaHandlers, n.b.funcOf(func(_ js.Value, args []js.Value) any {
+				// A local patch to the vendored MyGo: the media session on a
+				// LazyCat phone sends a seek without a time now and then, or
+				// with one that is not a number, and reading it anyway panicked
+				// the whole program while the page's audio played on: the UI
+				// froze and every control died. A seek without a time goes
+				// nowhere; one that panics must not take the app with it.
+				defer func() {
+					if r := recover(); r != nil {
+						println("mygo: media command panicked:", fmt.Sprint(r))
+					}
+				}()
 				var pos time.Duration
-				if cmd == platform.MediaSeek && len(args) > 0 {
-					pos = time.Duration(args[0].Get("seekTime").Float() * float64(time.Second))
+				if cmd == platform.MediaSeek && len(args) > 0 && args[0].Type() == js.TypeObject {
+					if v := args[0].Get("seekTime"); v.Type() == js.TypeNumber {
+						pos = time.Duration(v.Float() * float64(time.Second))
+					}
 				}
 				n.b.sync(func() { n.b.h.MediaCommand(cmd, pos) })
 				return nil

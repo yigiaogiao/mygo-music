@@ -16,6 +16,15 @@ if [ -z "$LZC_CLI" ]; then
 	fi
 fi
 
+# The server and the browser app show internal/version.Version, and the package
+# is versioned in package.yml: one bump, or the settings and the store disagree.
+pkg_version="$(sed -n 's/^version: *//p' lazycat/package.yml)"
+code_version="$(sed -n 's/^const Version = "\(.*\)"/\1/p' internal/version/version.go)"
+if [ "$pkg_version" != "$code_version" ]; then
+	echo "internal/version/version.go says $code_version, lazycat/package.yml says $pkg_version" >&2
+	exit 1
+fi
+
 ./scripts/build-web.sh
 
 echo "building the server for linux/amd64"
@@ -32,7 +41,7 @@ if ! file lazycat/content/music-server | grep -q 'statically linked'; then
 	exit 1
 fi
 
-cp web/index.html web/app.wasm web/app.wasm.gz web/wasm_exec.js lazycat/content/web/
+cp web/index.html web/lzc-media.js web/app.wasm web/app.wasm.gz web/wasm_exec.js lazycat/content/web/
 # LRCLib is reached over HTTPS; pack a CA bundle in case the runtime has none.
 cp /etc/ssl/certs/ca-certificates.crt lazycat/content/ca-certificates.crt
 
@@ -44,3 +53,23 @@ echo "packing"
 mkdir -p lazycat/dist
 (cd lazycat && $LZC_CLI project build . -f lzc-build.yml)
 ls -lh lazycat/dist/*.lpk
+
+# The netdisk the LazyCat client sideloads from gets the new package at once,
+# and keeps only it: the older ones go to the netdisk's trash.
+NETDISK="${NETDISK:-/lzcapp/document}"
+lpk="$(ls -t lazycat/dist/*-v"$pkg_version".lpk | head -1)"
+if [ -d "$NETDISK" ]; then
+	mkdir -p "$NETDISK/.Trash"
+	for old in "$NETDISK"/cloud.lazycat.app.mygomusic-v*.lpk; do
+		[ -e "$old" ] || continue
+		mv "$old" "$NETDISK/.Trash/"
+	done
+	cp "$lpk" "$NETDISK/"
+	if ! cmp -s "$lpk" "$NETDISK/$(basename "$lpk")"; then
+		echo "the copy on the netdisk isn't the one built" >&2
+		exit 1
+	fi
+	echo "delivered $(basename "$lpk") to $NETDISK ($(md5sum "$lpk" | cut -d' ' -f1))"
+else
+	echo "not delivering: no $NETDISK on this machine"
+fi

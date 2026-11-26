@@ -20,6 +20,13 @@ type device interface {
 // idleClose is how long the output stays open with nothing playing.
 const idleClose = 5 * time.Second
 
+// keepOpenIdle reports whether to keep the output open though nothing
+// plays. A browser page hidden in the background does: its audio context,
+// once suspended there, may not resume without the listener touching the
+// page, so a track that follows a slow one would never be heard. Elsewhere
+// this is false, and an idle output closes as it always did.
+var keepOpenIdle = func() bool { return false }
+
 var (
 	openOutput = openDevice // tests replace it
 
@@ -92,7 +99,7 @@ func run() {
 			}
 			if busy {
 				idle = 0
-			} else if idle += per; idle >= idleClose {
+			} else if idle += per; idle >= idleClose && !keepOpenIdle() {
 				break
 			}
 		}

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -90,6 +91,9 @@ type Source struct {
 	status   Status
 	onChange func()
 	known    bool
+	// device is what the server names this device, for the playback it
+	// shares with the listener's other devices.
+	device string
 }
 
 // New returns a source answered by the server at base, such as
@@ -286,9 +290,12 @@ func fail(kind, message string) error {
 }
 
 func (s *Source) Info() music.Info {
+	// The server's version, which is the app's: the settings show it beside
+	// the source, so that the listener can say which build they're on.
 	return music.Info{
 		ID:       ID,
 		Name:     i18n.T("Netdisk Music"),
+		Version:  s.Status().Version,
 		Playback: music.PlaybackStream,
 		Navigation: []music.NavItem{
 			{Builtin: "home"},
@@ -491,6 +498,17 @@ func (s *Source) Stream(id, quality string) (*music.Stream, error) {
 	var out music.Stream
 	err := s.call("Stream", []any{id, quality}, &out)
 	return &out, err
+}
+
+// StreamURL answers the URL of t's audio at the server, for a page that plays
+// it with a media element: the element fetches it itself, when it plays it, so
+// that a track change is no call, and the system keeps the browser fetching
+// with the screen off.
+func (s *Source) StreamURL(t music.Track) string {
+	if t.ID == "" {
+		return ""
+	}
+	return s.base + "/api/track/" + url.PathEscape(t.ID)
 }
 
 // Played tells the server what's played, for its Recent.
