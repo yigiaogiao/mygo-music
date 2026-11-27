@@ -142,13 +142,19 @@ func scanned(t *testing.T, folder string) *Source {
 	return s
 }
 
+// songs returns every song the source lists, by name whatever the case, for a
+// test to find them by, whatever order the pages show them in.
 func songs(t *testing.T, s *Source) []music.Track {
 	t.Helper()
 	b, err := s.Browse("songs")
 	if err != nil {
 		t.Fatal(err)
 	}
-	return b.Sections[0].Tracks
+	tracks := b.Sections[0].Tracks
+	slices.SortFunc(tracks, func(x, y music.Track) int {
+		return strings.Compare(strings.ToLower(x.Name), strings.ToLower(y.Name))
+	})
+	return tracks
 }
 
 func songNamed(t *testing.T, s *Source, name string) music.Track {
@@ -1086,13 +1092,19 @@ func TestHome(t *testing.T) {
 	}
 }
 
-// The pages hold everything, in order of name whatever the case, and tell what
-// they are; a page that doesn't exist is an error.
+// The pages hold everything, the songs latest added first and the albums and
+// artists in order of name whatever the case, and tell what they are; a page
+// that doesn't exist is an error.
 func TestBrowse(t *testing.T) {
 	dir := t.TempDir()
+	old := time.Now().Add(-3 * time.Hour)
 	for i, title := range []string{"beta", "Alpha", "Gamma"} {
-		write(t, filepath.Join(dir, fmt.Sprintf("%d.mp3", i)), mp3With(t,
+		path := write(t, filepath.Join(dir, fmt.Sprintf("%d.mp3", i)), mp3With(t,
 			[2]string{"TIT2", title}, [2]string{"TALB", title + " album"}, [2]string{"TPE1", title + " artist"}))
+		when := old.Add(time.Duration(i) * time.Hour)
+		if err := os.Chtimes(path, when, when); err != nil {
+			t.Fatal(err)
+		}
 	}
 	s := scanned(t, dir)
 
@@ -1100,7 +1112,7 @@ func TestBrowse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := names(b.Sections[0].Tracks); !slices.Equal(got, []string{"Alpha", "beta", "Gamma"}) || b.Title != "Songs" || b.Subtitle != "3 songs" {
+	if got := names(b.Sections[0].Tracks); !slices.Equal(got, []string{"Gamma", "Alpha", "beta"}) || b.Title != "Songs" || b.Subtitle != "3 songs" {
 		t.Errorf("songs: %q, %+v", got, b)
 	}
 

@@ -459,12 +459,26 @@ func (s *Source) Home() (*music.Browse, error) {
 		sections = append(sections, music.Section{Title: i18n.T("Playlists"), Playlists: playlists})
 	}
 	if len(recent) == 0 && len(cat.items) > 0 {
-		added := slices.Clone(cat.items)
-		slices.SortStableFunc(added, func(a, b *item) int { return cmp.Compare(b.Mod, a.Mod) })
+		added := songsByAdded(cat.items)
 		added = added[:min(len(added), homeRows)]
 		sections = append(sections, music.Section{Title: i18n.T("Songs"), Tracks: publicTracks(added), MorePage: "songs"})
 	}
 	return &music.Browse{Sections: sections}, nil
+}
+
+// songsByAdded returns the songs in the order they came to the folders, the
+// latest first: by the file's time, which is when it was put there, and by
+// name after, for files a scan found together.
+func songsByAdded(items []*item) []*item {
+	songs := slices.Clone(items)
+	slices.SortStableFunc(songs, func(a, b *item) int {
+		return cmp.Or(
+			cmp.Compare(b.Mod, a.Mod),
+			cmp.Compare(a.sortName, b.sortName),
+			cmp.Compare(a.Path, b.Path),
+		)
+	})
+	return songs
 }
 
 func (s *Source) Browse(page string) (*music.Browse, error) {
@@ -474,7 +488,7 @@ func (s *Source) Browse(page string) (*music.Browse, error) {
 		return &music.Browse{
 			Title:    i18n.T("Songs"),
 			Subtitle: i18n.Songs(len(cat.items)),
-			Sections: []music.Section{{Tracks: publicTracks(cat.items)}},
+			Sections: []music.Section{{Tracks: publicTracks(songsByAdded(cat.items))}},
 		}, nil
 	case "albums":
 		return &music.Browse{
