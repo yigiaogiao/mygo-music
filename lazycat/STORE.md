@@ -9,7 +9,7 @@
 
 | 材料 | 文件 |
 | --- | --- |
-| 安装包 | `lazycat/dist/cloud.lazycat.app.mygomusic-v<版本号>.lpk`（构建后生成，当前 0.1.47） |
+| 安装包 | `lazycat/dist/cloud.lazycat.app.mygomusic-v<版本号>.lpk`（构建后生成，当前 0.1.48） |
 | 图标 | `lazycat/icon.png`（512×512 PNG，约 190 KB） |
 | 桌面截图 | `lazycat/store/screenshots/pc/01-home.png` … `04-settings.png`（1920×1080，16:9） |
 | 手机截图 | `lazycat/store/screenshots/mobile/01-home.png` … `04-now-playing.png`（720×405，16:9） |

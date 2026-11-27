@@ -1,8 +1,6 @@
-- Fixed every control going dead after dragging the seek bar on a phone, with the music still playing while a reopened app showed nothing: a seek from the client without a valid time crashed the whole program; numbers, strings and objects are all handled now, and a seek with no time is ignored
-- Play, pause, previous, next and the seek bar on the lock screen and in the notification now go through the client's native calls, so they work with the screen off
-- A seek on a phone jumps at once, without pausing for decoding or waiting on a timer, so a lock-screen seek lands right away
-- The phone's back gesture now works as it does in LazyCat Music: a swipe from the screen's edge, or Android's back button, goes back one level at a time — closing Now Playing, the settings or the drawer first, then the page — and only leaves the app at the root, instead of dropping to the desktop from any page
-- The back control at the top of a phone's page is a single clean chevron now, with no "Back" pill and no forward button; Now Playing and the settings use the same control
+- A song's row on a phone no longer shows the three dots: the popup menu behind them is a desktop's, with rows too small for a finger, and it covered the list; the row shows the song's length there instead
+- The Songs section lists the songs added to the folders last first, on a phone and a computer alike
+- Includes 0.1.47: every control going dead after dragging the seek bar on a phone fixed; native play controls on the lock screen and in the notification; seeks that jump at once
 - Includes 0.1.45: silence after a track change with the screen off, stuck on "Buffering", fixed by playing through the page's own audio element on a phone; downloads resuming from where they stopped
 - Includes 0.1.44: a request tried again after 15 seconds, a retry at once on coming back to the app, and waiting in place instead of skipping tracks when the network goes in the background
 - Includes 0.1.42: playback going on with the screen off, the burst of noise at a track change gone, system media controls on the lock screen and in the notification, and hand-off between devices

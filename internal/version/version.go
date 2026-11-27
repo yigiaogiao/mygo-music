@@ -5,4 +5,4 @@
 package version
 
 // Version is the app's version.
-const Version = "0.1.47"
+const Version = "0.1.48"
