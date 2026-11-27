@@ -641,13 +641,9 @@ func (a *app) trackRow(c *ui.Context, tracks []music.Track, i int, covers bool, 
 				a.likeButton(c.Key("like"), tr, 15, p.muted)
 			}
 		})
-		if mobile {
-			// The length makes way for the menu, which a phone reaches by
-			// touch rather than by a right click.
-			a.songMenu(c.Key("more"), tr, 15, p.faint).Shrink(0)
-		} else {
-			ui.Text(c, clock(tr.Length())).FontSize(12.5).FontFeatures("tnum").TextColor(p.faint).Width(44).TextAlign(ui.End)
-		}
+		// The menu behind a song's dots is a desktop's, so a phone shows the
+		// length there instead, as a wide window does.
+		ui.Text(c, clock(tr.Length())).FontSize(12.5).FontFeatures("tnum").TextColor(p.faint).Width(44).TextAlign(ui.End)
 	})
 	if row.Clicked() && !tr.Unavailable {
 		a.pl.PlayTrack(tracks, i)

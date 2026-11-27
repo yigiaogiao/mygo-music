@@ -14,6 +14,20 @@ import (
 	"mygo-music/internal/music"
 )
 
+// A phone shows no dots on a song: the menu behind them is a desktop's, too
+// large for a finger, and it covered the list it was opened over.
+func TestSongMenuHiddenOnPhone(t *testing.T) {
+	a := newTestApp()
+	a.playlists["42"] = &music.Playlist{ID: "42", Name: "飙升榜", Tracks: []music.Track{song("1", "宝船", "DOUDOU")}}
+	a.route = route{page: pagePlaylist, src: "fake", id: "42"}
+	tt := ui.NewTester(a.view, 390, 844)
+	tt.Frame()
+
+	if err := tt.Click("More"); err == nil {
+		t.Error("a phone showed the dots of a song's menu")
+	}
+}
+
 // The menu behind a song's dots in Now Playing copies its title, with its
 // artists, and the link its source gave it.
 func TestSongMenuCopies(t *testing.T) {

@@ -14,6 +14,12 @@ var copyText = func(text string) error { return mygo.Clipboard.Write(transfer.Te
 // songMenu is three dots that open the menu of tr.
 func (a *app) songMenu(c *ui.Context, tr *music.Track, size float32, color ui.Color) ui.Element {
 	b := iconButton(c, iconMore, size, color, T("More"))
+	// A phone has no second button to open a menu of its own, and the menu
+	// the system shows over the page is made for a pointer, its rows too
+	// small for a finger and covering what's under it: the dots stay off.
+	if a.mobile(c) {
+		return b.Hidden(true)
+	}
 	b.Menu(a.songItems(tr, ""))
 	return b
 }
